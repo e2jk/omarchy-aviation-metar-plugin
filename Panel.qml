@@ -529,8 +529,10 @@ Panel {
                   id: metarToolTip
                   visible: metarHover.hovered && card.metar !== null
                   delay: 300
+                  width: Style.space(360)
                   text: card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : ""
                   contentItem: Text {
+                    width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
                     textFormat: Text.PlainText
                     text: metarToolTip.text
                     color: root.bar.foreground
@@ -590,8 +592,10 @@ Panel {
                     id: tafToolTip
                     visible: tafHover.hovered && card.taf !== null
                     delay: 300
+                    width: Style.space(360)
                     text: card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : ""
                     contentItem: Text {
+                      width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText
                       text: tafToolTip.text
                       color: root.bar.foreground
