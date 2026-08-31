@@ -118,44 +118,48 @@ function tafRawSegments(rawTAF) {
   return segments.map(function(s) { return s.replace(/^\s+|\s+$/g, "") }).filter(function(s) { return s.length > 0 })
 }
 
-// Returns { meters, plus, cavok } describing the coded visibility, or null
-// if no visibility group could be found. `plus` means "this value or
-// greater" (ICAO 9999, or the CAVOK case). Shared core for both a full
-// METAR/TAF report and a single TAF change-group segment.
+// Returns { meters, plus, lessThan, cavok} describing the coded visibility,
+// or null if no visibility group could be found. `plus` means "this value or
+// greater" (ICAO 9999, CAVOK, or FAA "P6SM" — confirmed current and common
+// in real TAFs, not just a legacy code: 24 occurrences checked across 6 US
+// airports' live TAFs). `lessThan` means "less than this value" (FAA
+// "M1/4SM", automated stations only). Shared core for both a full METAR/TAF
+// report and a single TAF change-group segment.
 function parseVisibilityFromTokens(tokens) {
   var i = 0
 
   // Skip the surface wind group (ddd/VRB + speed + optional gust + unit)...
-  if (i < tokens.length && /^(VRB|\d{3})P?\d{2,3}(G\d{2,3})?(KT|MPS|KMH)$/.test(tokens[i])) i++
+  if (i < tokens.length && /^(VRB|\d{3})\d{2,3}(G\d{2,3})?(KT|MPS|KMH)$/.test(tokens[i])) i++
   // ...and a following variable-wind-direction group, if present.
   if (i < tokens.length && /^\d{3}V\d{3}$/.test(tokens[i])) i++
   if (i >= tokens.length) return null
 
   var token = tokens[i]
 
-  if (token === "CAVOK") return { meters: 10000, plus: true, cavok: true }
+  if (token === "CAVOK") return { meters: 10000, plus: true, lessThan: false, cavok: true }
 
   // ICAO group: exactly 4 digits, optionally followed by a minimum-visibility
   // direction qualifier (e.g. "9999NDV", "1400W"). 9999 means "10km+".
   if (/^\d{4}[A-Z]{0,3}$/.test(token)) {
     var meters = parseInt(token.slice(0, 4), 10)
-    return { meters: meters, plus: meters === 9999, cavok: false }
+    return { meters: meters, plus: meters === 9999, lessThan: false, cavok: false }
   }
 
-  // US/Canada statute-mile group, e.g. "10SM", "1/2SM", "M1/4SM", or a
-  // whole-number token followed by a separate fraction token ("1" "1/2SM").
+  // US/Canada statute-mile group: "10SM", "1/2SM", "M1/4SM" (less than),
+  // "P6SM" (greater than), or a whole-number token followed by a separate
+  // fraction token ("1" "1/2SM").
   var whole = 0
   if (/^\d{1,2}$/.test(token) && /^\d\/\dSM$/.test(tokens[i + 1] || "")) {
     whole = parseInt(token, 10)
     i++
     token = tokens[i]
   }
-  var sm = token.match(/^(M)?(?:(\d{1,2})(?:\/(\d))?)?SM$/)
+  var sm = token.match(/^([MP])?(?:(\d{1,2})(?:\/(\d))?)?SM$/)
   if (sm && (sm[2] !== undefined || whole > 0)) {
     var num = sm[2] !== undefined ? parseInt(sm[2], 10) : 0
     var den = sm[3] !== undefined ? parseInt(sm[3], 10) : 1
     var miles = whole + num / den
-    return { meters: miles * 1609.344, plus: false, cavok: false }
+    return { meters: miles * 1609.344, plus: sm[1] === "P", lessThan: sm[1] === "M", cavok: false }
   }
 
   return null
@@ -232,16 +236,17 @@ function formatVisibilityFromMetar(metar, imperial) {
 
   var raw = parseVisibilityFromRaw(metar.rawOb)
   if (raw) {
-    var plusSuffix = raw.plus ? "+" : ""
+    var prefix = raw.lessThan ? "<" : ""
+    var suffix = raw.plus ? "+" : ""
     if (imperial) {
       var miles = raw.meters / 1609.344
       var mRounded = miles >= 10 ? Math.round(miles) : Math.round(miles * 10) / 10
-      return mRounded + plusSuffix + " mi"
+      return prefix + mRounded + suffix + " mi"
     }
-    if (!raw.plus && raw.meters < 1000) return Math.round(raw.meters) + " m"
+    if (!raw.plus && raw.meters < 1000) return prefix + Math.round(raw.meters) + " m"
     var km = raw.meters / 1000
     var kRounded = km >= 10 ? Math.round(km) : Math.round(km * 10) / 10
-    return kRounded + plusSuffix + " km"
+    return prefix + kRounded + suffix + " km"
   }
 
   var parsed = parseVisib(metar.visib)
@@ -436,9 +441,11 @@ function decodeTafText(taf, imperial, formatTime) {
       ? parseVisibilityFromTokens(i === 0 ? tafBaseSignificantTokens(segments[i]) : tafSegmentSignificantTokens(segments[i]))
       : null
     if (segVis && !segVis.cavok) {
+      var visPrefix = segVis.lessThan ? "<" : ""
+      var visSuffix = segVis.plus ? "+" : ""
       var val = imperial ? segVis.meters / 1609.344 : segVis.meters / 1000
-      if (!imperial && segVis.meters < 1000) bits.push("visibility " + Math.round(segVis.meters) + "m")
-      else bits.push("visibility " + (val >= 10 ? Math.round(val) : Math.round(val * 10) / 10) + (segVis.plus ? "+" : "") + " " + (imperial ? "mi" : "km"))
+      if (!imperial && segVis.meters < 1000) bits.push("visibility " + visPrefix + Math.round(segVis.meters) + "m")
+      else bits.push("visibility " + visPrefix + (val >= 10 ? Math.round(val) : Math.round(val * 10) / 10) + visSuffix + " " + (imperial ? "mi" : "km"))
     } else if (segVis && segVis.cavok) {
       bits.push("CAVOK")
     }
