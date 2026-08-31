@@ -53,9 +53,20 @@ both METAR and each TAF change group.
 [aviationweather.gov](https://aviationweather.gov)'s public data API — no
 API key, no rate-limit surprises for personal use, and it covers ICAO
 stations worldwide (not just the US) despite the domain. Flight category is
-read straight from the API's `fltCat` field when present, with a
-FAA-threshold fallback classifier (ceiling/visibility) for the rare station
-that doesn't report one.
+read straight from the API's `fltCat` field when present, with a fallback
+classifier (ceiling/visibility) for the rare station that doesn't report
+one, using the official FAA flight-category thresholds (AIM 7-1-7 / 14 CFR
+Part 91):
+
+| Category | Ceiling         | Visibility     |
+|----------|-----------------|----------------|
+| LIFR     | < 500 ft        | < 1 sm         |
+| IFR      | 500–999 ft      | 1–<3 sm        |
+| MVFR     | 1,000–3,000 ft  | 3–5 sm         |
+| VFR      | > 3,000 ft      | > 5 sm         |
+
+Ceiling and visibility are each independently checked; whichever is more
+restrictive sets the category (`Model.js`: `classifyFlightCategory`).
 
 **Visibility is parsed from the raw METAR/TAF text, not the API's `visib`
 JSON field.** That field re-expresses visibility on the US reportable-miles
