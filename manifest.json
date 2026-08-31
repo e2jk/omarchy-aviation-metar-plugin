@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "metar-taf",
+  "name": "METAR / TAF",
+  "version": "1.0.0",
+  "author": "e2jk",
+  "description": "Flight-category indicator (VFR/MVFR/IFR/LIFR) for your favorite airports, with a METAR/TAF detail popup",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "METAR / TAF",
+    "description": "Flight-category letters for configured airports; click for full METAR/TAF detail",
+    "category": "Info",
+    "allowMultiple": true,
+    "defaultSection": "center",
+    "schema": [
+      {
+        "key": "airports",
+        "type": "string",
+        "label": "Airports (ICAO)",
+        "defaultValue": "EBAW,EBBR,EBCI",
+        "description": "Comma-separated ICAO station identifiers, e.g. EBAW,EBBR,EBCI"
+      },
+      {
+        "key": "units",
+        "type": "enum",
+        "label": "Units",
+        "options": ["Metric", "Imperial"],
+        "defaultValue": "Metric",
+        "description": "Metric: °C, km, hPa. Imperial: °F, mi, inHg. Wind speed always stays in knots, the aviation standard everywhere."
+      },
+      {
+        "key": "showTaf",
+        "type": "boolean",
+        "label": "Show TAF",
+        "description": "Include the Terminal Aerodrome Forecast under each station's METAR.",
+        "defaultValue": true
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Refresh interval (minutes)",
+        "min": 5,
+        "max": 60,
+        "step": 5,
+        "defaultValue": 10
+      }
+    ]
+  }
+}
