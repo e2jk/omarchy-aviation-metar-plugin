@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -63,19 +64,58 @@ Panel {
   readonly property bool imperial: setting("units", "Metric") === "Imperial"
   readonly property bool showTaf: setting("showTaf", true) === true
   readonly property int refreshMinutes: Math.max(5, parseInt(setting("refreshMinutes", 10), 10) || 10)
+  readonly property bool showStationNameInTooltip: setting("showStationNameInTooltip", true) === true
+  // Decoded English is the default (friendlier for anyone who doesn't read
+  // METAR groups); hovering the report always reveals whichever form isn't
+  // the primary one.
+  readonly property bool decoded: setting("decodeStyle", "Decoded") !== "Coded"
+  readonly property int maxAgeMinutes: Math.max(10, Math.min(180, parseInt(setting("maxAgeMinutes", 40), 10) || 40))
 
   onAirportListChanged: Qt.callLater(refresh)
   onShowTafChanged: Qt.callLater(refresh)
 
-  // ---- Fetch state. Kept on failure so stale data stays visible rather than
-  //      flashing to "no data" on a transient network hiccup.
+  // Forces `entries` to re-evaluate staleness periodically even when no new
+  // fetch happens — otherwise a station whose last report ages past
+  // maxAgeMinutes would only flip to "no data" at the next refresh cycle.
+  property double nowTick: Date.now() / 1000
+  Timer {
+    interval: 60000
+    running: true
+    repeat: true
+    onTriggered: root.nowTick = Date.now() / 1000
+  }
+
+  // ---- Fetch state. Metar data is kept around even after a failed refresh —
+  //      see metarOffline below for how that stale data is presented rather
+  //      than silently passed off as current.
   property var metarByIcao: ({})
   property var tafByIcao: ({})
   property double lastUpdated: 0
   property int metarRetries: 0
   property int tafRetries: 0
 
-  readonly property var entries: Model.buildEntries(airportList, metarByIcao)
+  // Set once the very first fetch ever completes successfully; used to tell
+  // "still loading for the first time" apart from "reachable but no data for
+  // this station".
+  property bool metarEverSucceeded: false
+  // True once the most recent fetch attempt — including its retries — ends
+  // without success. This is aviation weather: a stale METAR silently shown
+  // as current is worse than an honest "no data", so this is surfaced on the
+  // bar itself, not just in a tooltip.
+  property bool metarOffline: false
+  // True only while a refresh the user explicitly asked for (middle click)
+  // is in flight, so triggering it visibly does something. Deliberately not
+  // set for the silent background refreshMinutes timer — the bar shouldn't
+  // flicker to a placeholder every refresh cycle on its own.
+  property bool manualRefreshInFlight: false
+
+  readonly property var entries: Model.buildEntries(airportList, metarByIcao, {
+    loading: root.manualRefreshInFlight,
+    everSucceeded: root.metarEverSucceeded,
+    offline: root.metarOffline,
+    nowSeconds: root.nowTick,
+    maxAgeMinutes: root.maxAgeMinutes
+  })
   readonly property string summary: Model.summaryLine(entries)
   readonly property bool loading: metarProc.running || (root.showTaf && tafProc.running)
 
@@ -86,6 +126,13 @@ Panel {
     fetchMetar()
     if (root.showTaf) fetchTaf()
     else tafByIcao = {}
+  }
+
+  // Entry point for the bar's middle-click / explicit "refresh" action —
+  // the only path that shows the transient loading dash.
+  function refreshManual() {
+    manualRefreshInFlight = true
+    refresh()
   }
 
   function fetchMetar() {
@@ -103,7 +150,11 @@ Panel {
   }
 
   function scheduleMetarRetry() {
-    if (metarRetries >= 3) return
+    if (metarRetries >= 3) {
+      root.metarOffline = true
+      root.manualRefreshInFlight = false
+      return
+    }
     metarRetries++
     metarRetryTimer.restart()
   }
@@ -115,7 +166,7 @@ Panel {
   }
 
   function formatTemp(c) { return Model.formatTemp(c, root.imperial) }
-  function formatVisibility(v) { return Model.formatVisibility(v, root.imperial) }
+  function formatVisibility(metar) { return Model.formatVisibilityFromMetar(metar, root.imperial) }
   function formatAltimeter(a) { return Model.formatAltimeter(a, root.imperial) }
   function formatWind(dir, spd, gst) { return Model.formatWind(dir, spd, gst) }
   function formatClouds(clouds) { return Model.formatClouds(clouds) }
@@ -138,6 +189,9 @@ Panel {
           var parsed = JSON.parse(raw)
           root.metarByIcao = Model.buildByIcao(parsed)
           root.metarRetries = 0
+          root.metarEverSucceeded = true
+          root.metarOffline = false
+          root.manualRefreshInFlight = false
           root.lastUpdated = Date.now() / 1000
         } catch (e) {
           root.scheduleMetarRetry()
@@ -193,7 +247,7 @@ Panel {
     function show(): void { root.openFromHotkey() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
-    function refresh(): void { root.refresh() }
+    function refresh(): void { root.refreshManual() }
   }
 
   KeyboardPanel {
@@ -294,7 +348,7 @@ Panel {
                   anchors.fill: parent
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: root.refresh()
+                  onClicked: root.refreshManual()
                 }
               }
             }
@@ -392,6 +446,25 @@ Panel {
                 }
               }
 
+              // ---- Stale/offline banner. Cached data is still shown below
+              // (useful context), but never silently as if it were current.
+              Text {
+                visible: card.modelData.stale === true
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(16)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(16)
+                textFormat: Text.PlainText
+                text: "⚠ " + (card.modelData.age !== null && card.modelData.age !== undefined
+                  ? "Last observation " + Model.formatAge(card.modelData.age) + " ago — treating as no data."
+                  : "Unable to reach aviationweather.gov.")
+                color: Qt.darker(root.bar.foreground, 1.3)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.italic: true
+                wrapMode: Text.WordWrap
+              }
+
               // ---- Decoded stats row.
               Row {
                 visible: card.metar !== null
@@ -407,7 +480,7 @@ Panel {
                 Column {
                   spacing: Style.space(3)
                   Text { text: "VIS"; color: Qt.darker(root.bar.foreground, 1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 1 }
-                  Text { textFormat: Text.PlainText; text: card.metar ? root.formatVisibility(card.metar.visib) : "—"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  Text { textFormat: Text.PlainText; text: card.metar ? root.formatVisibility(card.metar) : "—"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
                 }
                 Column {
                   spacing: Style.space(3)
@@ -428,26 +501,50 @@ Panel {
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(16)
                 textFormat: Text.PlainText
-                text: card.metar ? root.formatClouds(card.clouds) : ""
+                text: card.metar ? "Clouds: " + root.formatClouds(card.clouds) : ""
                 color: Qt.darker(root.bar.foreground, 1.4)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
               }
 
-              // ---- Raw METAR.
+              // ---- METAR: coded or decoded is the primary text (decoded by
+              // default), hovering always reveals whichever one isn't shown.
               Text {
+                id: metarText
                 visible: card.metar !== null
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(16)
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(16)
                 textFormat: Text.PlainText
-                text: card.metar ? card.metar.rawOb : ""
+                text: card.metar ? (root.decoded ? Model.decodeMetarText(card.metar, root.imperial) : card.metar.rawOb) : ""
                 color: Qt.darker(root.bar.foreground, 1.2)
-                font.family: "monospace"
+                font.family: root.decoded ? root.bar.fontFamily : "monospace"
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
+
+                HoverHandler { id: metarHover }
+                ToolTip {
+                  id: metarToolTip
+                  visible: metarHover.hovered && card.metar !== null
+                  delay: 300
+                  text: card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : ""
+                  contentItem: Text {
+                    textFormat: Text.PlainText
+                    text: metarToolTip.text
+                    color: root.bar.foreground
+                    font.family: root.decoded ? "monospace" : root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+                  background: Rectangle {
+                    color: root.bar.background
+                    border.color: Qt.darker(root.bar.foreground, 1.4)
+                    border.width: 1
+                    radius: Style.cornerRadius
+                  }
+                }
               }
 
               Text {
@@ -461,7 +558,7 @@ Panel {
                 font.italic: true
               }
 
-              // ---- TAF.
+              // ---- TAF: same coded/decoded + hover-reveals-the-other pattern.
               Column {
                 visible: root.showTaf && card.taf !== null
                 anchors.left: parent.left
@@ -479,13 +576,36 @@ Panel {
                   font.letterSpacing: 1
                 }
                 Text {
+                  id: tafText
                   textFormat: Text.PlainText
-                  text: card.taf ? card.taf.rawTAF : ""
+                  text: card.taf ? (root.decoded ? Model.decodeTafText(card.taf, root.imperial, root.formatEpoch) : card.taf.rawTAF) : ""
                   color: Qt.darker(root.bar.foreground, 1.2)
-                  font.family: "monospace"
+                  font.family: root.decoded ? root.bar.fontFamily : "monospace"
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WordWrap
                   width: parent.width
+
+                  HoverHandler { id: tafHover }
+                  ToolTip {
+                    id: tafToolTip
+                    visible: tafHover.hovered && card.taf !== null
+                    delay: 300
+                    text: card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : ""
+                    contentItem: Text {
+                      textFormat: Text.PlainText
+                      text: tafToolTip.text
+                      color: root.bar.foreground
+                      font.family: root.decoded ? "monospace" : root.bar.fontFamily
+                      font.pixelSize: Style.font.caption
+                      wrapMode: Text.WordWrap
+                    }
+                    background: Rectangle {
+                      color: root.bar.background
+                      border.color: Qt.darker(root.bar.foreground, 1.4)
+                      border.width: 1
+                      radius: Style.cornerRadius
+                    }
+                  }
                 }
               }
             }

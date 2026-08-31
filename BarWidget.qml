@@ -19,6 +19,11 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
   }
 
+  // Middle click / explicit refresh — shows the transient loading dash.
+  function refreshManual() {
+    if (panelLoader.item && panelLoader.item.refreshManual) panelLoader.item.refreshManual()
+  }
+
   function togglePanel() {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
@@ -51,11 +56,13 @@ BarWidget {
     return parts.join(" ")
   }
 
+  readonly property bool showStationNameInTooltip: setting("showStationNameInTooltip", true) === true
+
   readonly property string barTooltip: {
     var lines = []
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i]
-      lines.push(e.icao + "  " + e.category + (e.stationName ? "  (" + e.stationName + ")" : ""))
+      lines.push(e.icao + "  " + e.category + (root.showStationNameInTooltip && e.stationName ? "  (" + e.stationName + ")" : ""))
     }
     return lines.join("\n")
   }
@@ -89,8 +96,8 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.bar) return
-      if (b === Qt.RightButton) root.bar.run("omarchy-notification-send " + root.bar.shellQuote(root.barTooltip.replace(/\n/g, " · ")))
-      else if (b === Qt.MiddleButton) root.refresh()
+      if (b === Qt.RightButton) root.bar.run("omarchy-notification-send " + Util.shellQuote(root.barTooltip.replace(/\n/g, " · ")))
+      else if (b === Qt.MiddleButton) root.refreshManual()
       else root.togglePanel()
     }
   }

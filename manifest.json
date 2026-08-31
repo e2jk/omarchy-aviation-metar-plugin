@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "id": "metar-taf",
-  "name": "METAR / TAF",
+  "name": "Aviation Weather (METAR/TAF)",
   "version": "1.0.0",
   "author": "e2jk",
-  "description": "Flight-category indicator (VFR/MVFR/IFR/LIFR) for your favorite airports, with a METAR/TAF detail popup",
+  "description": "Aviation flight-category indicator (VFR/MVFR/IFR/LIFR) for your favorite airports, with a METAR/TAF detail popup",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "METAR / TAF",
-    "description": "Flight-category letters for configured airports; click for full METAR/TAF detail",
+    "displayName": "Aviation Weather (METAR/TAF)",
+    "description": "Aviation flight-category letters for configured airports; click for full METAR/TAF detail",
     "category": "Info",
     "allowMultiple": true,
     "defaultSection": "center",
@@ -46,6 +46,31 @@
         "max": 60,
         "step": 5,
         "defaultValue": 10
+      },
+      {
+        "key": "showStationNameInTooltip",
+        "type": "boolean",
+        "label": "Show station name in tooltip",
+        "description": "Include the full airport name in the hover tooltip, not just the ICAO code and category.",
+        "defaultValue": true
+      },
+      {
+        "key": "decodeStyle",
+        "type": "enum",
+        "label": "METAR/TAF report style",
+        "options": ["Decoded", "Coded"],
+        "defaultValue": "Decoded",
+        "description": "Decoded: plain-English report, hover to see the raw coded text. Coded: raw METAR/TAF text, hover to see it decoded."
+      },
+      {
+        "key": "maxAgeMinutes",
+        "type": "integer",
+        "label": "Max data age (minutes)",
+        "min": 10,
+        "max": 180,
+        "step": 5,
+        "defaultValue": 40,
+        "description": "Aviation weather is hyper-local and changes fast. A station's last report older than this is treated as no data rather than shown as current."
       }
     ]
   }
