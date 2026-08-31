@@ -480,7 +480,7 @@ Panel {
                 Column {
                   spacing: Style.space(3)
                   Text { text: "VIS"; color: Qt.darker(root.bar.foreground, 1.5); font.family: root.bar.fontFamily; font.pixelSize: Style.font.caption; font.letterSpacing: 1 }
-                  Text { textFormat: Text.PlainText; text: card.metar ? root.formatVisibility(card.metar) : "—"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall }
+                  Text { textFormat: Text.PlainText; text: card.metar ? root.formatVisibility(card.metar) : "—"; color: root.bar.foreground; font.family: root.bar.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true }
                 }
                 Column {
                   spacing: Style.space(3)
@@ -502,9 +502,10 @@ Panel {
                 anchors.rightMargin: Style.space(16)
                 textFormat: Text.PlainText
                 text: card.metar ? "Clouds: " + root.formatClouds(card.clouds) : ""
-                color: Qt.darker(root.bar.foreground, 1.4)
+                color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.bodySmall
+                font.bold: true
                 wrapMode: Text.WordWrap
               }
 
