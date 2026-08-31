@@ -111,6 +111,16 @@ plain-JS modules independently of the component reload, so a change there
 needs `omarchy-restart-shell` to actually take effect, not just
 `rescanPlugins`.
 
+## Remove
+
+```bash
+omarchy plugin remove metar-taf
+```
+
+This deletes `~/.config/omarchy/plugins/metar-taf/` and drops the widget
+from the bar layout in `~/.config/omarchy/shell.json`. Nothing else on the
+system is touched — no daemons, no other config files.
+
 ## Configuration
 
 Set these from Setup → Plugins in the Omarchy menu, or inline in
