@@ -7,6 +7,6 @@
     "prepare": "git config core.hooksPath scripts/git-hooks"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.8.0"
   }
 }
