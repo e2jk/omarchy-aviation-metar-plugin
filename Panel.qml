@@ -668,7 +668,7 @@ Panel {
                   delay: 300
                   width: Style.space(360)
                   text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : "")
-                    + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " METAR currently displayed, not this " + (root.decoded ? "coded" : "decoded") + " preview"
+                    + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " METAR currently displayed, not the " + (root.decoded ? "coded" : "decoded") + " text in this tooltip"
                   contentItem: Text {
                     width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
                     textFormat: Text.PlainText
@@ -735,7 +735,7 @@ Panel {
                     delay: 300
                     width: Style.space(360)
                     text: (card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : "")
-                      + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " TAF currently displayed, not this " + (root.decoded ? "coded" : "decoded") + " preview"
+                      + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " TAF currently displayed, not the " + (root.decoded ? "coded" : "decoded") + " text in this tooltip"
                     contentItem: Text {
                       width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText
