@@ -74,6 +74,7 @@ Panel {
   // the primary one.
   readonly property bool decoded: setting("decodeStyle", "Decoded") !== "Coded"
   readonly property int maxAgeMinutes: Math.max(10, Math.min(180, parseInt(setting("maxAgeMinutes", 40), 10) || 40))
+  readonly property int hoverRefreshMinutes: Math.max(1, Math.min(30, parseInt(setting("hoverRefreshMinutes", 2), 10) || 2))
 
   onAirportListChanged: Qt.callLater(refresh)
   onShowTafChanged: Qt.callLater(refresh)
@@ -117,6 +118,52 @@ Panel {
   // set for the silent background refreshMinutes timer — the bar shouldn't
   // flicker to a placeholder every refresh cycle on its own.
   property bool manualRefreshInFlight: false
+
+  // ---- Hover-triggered background refresh. Hovering the bar when the data
+  // is older than hoverRefreshMinutes quietly refreshes in the background —
+  // deliberately NOT fed into buildEntries' `loading` (no dash, no visible
+  // disruption while it's in flight). Once it settles, the fetched data is
+  // fingerprinted (raw METAR+TAF text, not the full API payload — see
+  // Model.dataFingerprint) and compared against what was showing before the
+  // hover-refresh started; only a genuine change triggers `justUpdated`,
+  // which the bar uses to briefly flash — a hover refresh that came back
+  // identical stays completely silent, as specified in issue #5.
+  property bool hoverRefreshInFlight: false
+  property string preHoverFingerprint: ""
+  property bool justUpdated: false
+
+  function refreshIfStale() {
+    if (root.manualRefreshInFlight || root.hoverRefreshInFlight) return
+    if (!root.metarEverSucceeded) return // let the initial-load path own this
+    if (root.airportList.length === 0) return
+    var now = Date.now() / 1000
+    if (root.lastUpdated > 0 && (now - root.lastUpdated) < root.hoverRefreshMinutes * 60) return
+    root.hoverRefreshInFlight = true
+    root.preHoverFingerprint = Model.dataFingerprint(root.airportList, root.metarByIcao, root.tafByIcao)
+    root.refresh()
+  }
+
+  // Called after each fetch attempt settles (success or a scheduled-retry
+  // gap); only actually resolves once neither fetch is running nor has a
+  // retry pending, so a hover refresh's comparison waits for the full
+  // picture rather than firing mid-retry.
+  function maybeFinishHoverRefresh() {
+    if (!root.hoverRefreshInFlight) return
+    if (metarProc.running || metarRetryTimer.running) return
+    if (root.showTaf && (tafProc.running || tafRetryTimer.running)) return
+    root.hoverRefreshInFlight = false
+    var newFingerprint = Model.dataFingerprint(root.airportList, root.metarByIcao, root.tafByIcao)
+    if (newFingerprint !== root.preHoverFingerprint) {
+      root.justUpdated = true
+      justUpdatedResetTimer.restart()
+    }
+  }
+
+  Timer {
+    id: justUpdatedResetTimer
+    interval: 2000
+    onTriggered: root.justUpdated = false
+  }
 
   readonly property var entries: Model.buildEntries(airportList, metarByIcao, {
     loading: root.manualRefreshInFlight,
@@ -163,6 +210,7 @@ Panel {
     if (metarRetries >= 3) {
       root.metarOffline = true
       root.manualRefreshInFlight = false
+      Qt.callLater(root.maybeFinishHoverRefresh)
       return
     }
     metarRetries++
@@ -170,7 +218,10 @@ Panel {
   }
 
   function scheduleTafRetry() {
-    if (tafRetries >= 3) return
+    if (tafRetries >= 3) {
+      Qt.callLater(root.maybeFinishHoverRefresh)
+      return
+    }
     tafRetries++
     tafRetryTimer.restart()
   }
@@ -225,6 +276,7 @@ Panel {
       root.metarOffline = false
       root.manualRefreshInFlight = false
       root.lastUpdated = Date.now() / 1000
+      Qt.callLater(root.maybeFinishHoverRefresh)
     }
   }
 
@@ -253,6 +305,7 @@ Panel {
 
       root.tafByIcao = Model.buildByIcao(parsed)
       root.tafRetries = 0
+      Qt.callLater(root.maybeFinishHoverRefresh)
     }
   }
 

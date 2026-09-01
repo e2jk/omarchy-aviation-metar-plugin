@@ -162,6 +162,7 @@ Set these from Setup → Plugins in the Omarchy menu, or inline in
 | `showTaf`                   | boolean | `true`             | Include the TAF under each station's METAR                               |
 | `refreshMinutes`            | integer | `10`               | How often to re-fetch (5–60 min)                                         |
 | `maxAgeMinutes`             | integer | `40`               | A station's last report older than this is treated as no data (10–180)   |
+| `hoverRefreshMinutes`       | integer | `2`                | Hovering the bar refreshes in the background past this age (1–30)        |
 | `decodeStyle`               | enum    | `Decoded`           | `Decoded` (plain English) or `Coded` (raw text) as the primary view      |
 | `showStationNameInTooltip`  | boolean | `true`             | Include the full airport name in the bar's hover tooltip                 |
 
@@ -178,6 +179,13 @@ cross-country you're planning.
 | Right click   | Send a desktop notification with a one-line summary              |
 | Hover (bar)   | Tooltip with each airport's full category and (optionally) name  |
 | Hover (report)| Reveals whichever of coded/decoded isn't the primary view        |
+
+Hovering the bar also refreshes in the background if the data is older than
+`hoverRefreshMinutes` (default 2 min) — silently. It only becomes visible
+(a brief color flash on the bar letters) if the refreshed METAR/TAF text
+actually differs from what was already showing; a hover refresh that comes
+back identical is a complete no-op, so hovering to check freshness never
+adds visual noise for its own sake.
 
 ## Development
 

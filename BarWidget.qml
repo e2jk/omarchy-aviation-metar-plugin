@@ -24,6 +24,15 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.refreshManual) panelLoader.item.refreshManual()
   }
 
+  // Hover — silently refreshes in the background if the data is stale
+  // enough (see Panel.qml's hoverRefreshMinutes); only flashes if the
+  // refreshed data actually differs from what was already showing.
+  function refreshIfStale() {
+    if (panelLoader.item && panelLoader.item.refreshIfStale) panelLoader.item.refreshIfStale()
+  }
+
+  readonly property bool justUpdated: panelLoader.item ? panelLoader.item.justUpdated === true : false
+
   function togglePanel() {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
@@ -93,12 +102,20 @@ BarWidget {
     fontSize: Style.font.bodySmall
     horizontalMargin: 6
     tooltipText: root.barTooltip
+    // Reuses the button's existing active/activeColor color-flash — the
+    // same mechanism every other indicator's "something changed" state
+    // already uses — rather than inventing a bespoke animation.
+    active: root.justUpdated
 
     onPressed: function(b) {
       if (!root.bar) return
       if (b === Qt.RightButton) root.bar.run("omarchy-notification-send " + Util.shellQuote(root.barTooltip.replace(/\n/g, " · ")))
       else if (b === Qt.MiddleButton) root.refreshManual()
       else root.togglePanel()
+    }
+
+    HoverHandler {
+      onHoveredChanged: if (hovered) root.refreshIfStale()
     }
   }
 }

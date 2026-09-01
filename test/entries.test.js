@@ -123,3 +123,45 @@ describe("summaryLine", () => {
     assert.equal(M.summaryLine(entries), "EBAW VFR · EBBR MVFR")
   })
 })
+
+describe("fnv1aHash", () => {
+  it("is deterministic for the same input", () => {
+    assert.equal(M.fnv1aHash("hello"), M.fnv1aHash("hello"))
+  })
+
+  it("differs for different input", () => {
+    assert.notEqual(M.fnv1aHash("hello"), M.fnv1aHash("world"))
+  })
+
+  it("handles the empty string", () => {
+    assert.equal(typeof M.fnv1aHash(""), "string")
+  })
+})
+
+describe("dataFingerprint", () => {
+  var metarByIcao = { EBAW: { rawOb: "METAR EBAW ..." } }
+  var tafByIcao = { EBAW: { rawTAF: "TAF EBAW ..." } }
+
+  it("is stable for the same data", () => {
+    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
+    assert.equal(a, b)
+  })
+
+  it("changes when a METAR changes", () => {
+    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprint(["EBAW"], { EBAW: { rawOb: "METAR EBAW updated" } }, tafByIcao)
+    assert.notEqual(a, b)
+  })
+
+  it("changes when a TAF changes", () => {
+    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprint(["EBAW"], metarByIcao, { EBAW: { rawTAF: "TAF EBAW updated" } })
+    assert.notEqual(a, b)
+  })
+
+  it("tolerates a missing metar/taf entry for a configured airport", () => {
+    var fp = M.dataFingerprint(["EBXX"], {}, {})
+    assert.equal(typeof fp, "string")
+  })
+})

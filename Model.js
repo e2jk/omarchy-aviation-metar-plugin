@@ -618,6 +618,35 @@ function summaryLine(entries) {
   return parts.join(" · ")
 }
 
+// Simple non-cryptographic string hash (FNV-1a) — good enough to detect
+// "did anything change", nothing more. Used to decide whether a
+// hover-triggered background refresh actually found new data worth
+// animating, or was silently a no-op (see dataFingerprint below).
+function fnv1aHash(str) {
+  var hash = 0x811c9dc5
+  for (var i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i)
+    hash = (hash * 0x01000193) >>> 0
+  }
+  return hash.toString(16)
+}
+
+// A fingerprint of exactly the coded text a person would read — the raw
+// METAR and TAF strings for every configured airport, in list order — not
+// the full API payload (which carries fields like receiptTime/dbPopTime
+// that change on every single request regardless of whether the weather
+// itself did).
+function dataFingerprint(airportList, metarByIcao, tafByIcao) {
+  var parts = []
+  for (var i = 0; i < airportList.length; i++) {
+    var icao = airportList[i]
+    var metar = metarByIcao[icao]
+    var taf = tafByIcao[icao]
+    parts.push(icao + ":" + (metar && metar.rawOb ? metar.rawOb : "") + "|" + (taf && taf.rawTAF ? taf.rawTAF : ""))
+  }
+  return fnv1aHash(parts.join(";"))
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parseAirportList: parseAirportList,
@@ -650,6 +679,8 @@ if (typeof module !== "undefined") {
     decodeTafText: decodeTafText,
     buildByIcao: buildByIcao,
     buildEntries: buildEntries,
-    summaryLine: summaryLine
+    summaryLine: summaryLine,
+    fnv1aHash: fnv1aHash,
+    dataFingerprint: dataFingerprint
   }
 }
