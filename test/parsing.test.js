@@ -13,8 +13,8 @@ describe("parseAirportList", () => {
     assert.deepEqual(M.parseAirportList(" ebaw, ebbr\nebci "), ["EBAW", "EBBR", "EBCI"])
   })
 
-  it("drops codes shorter than 3 or longer than 5 characters", () => {
-    assert.deepEqual(M.parseAirportList("AB,ABCDEF,ABC,ABCD,ABCDE"), ["ABC", "ABCD", "ABCDE"])
+  it("keeps only exactly-4-character codes (the ICAO format)", () => {
+    assert.deepEqual(M.parseAirportList("AB,ABC,ABCD,ABCDE,ABCDEF"), ["ABCD"])
   })
 
   it("drops codes with non-alphanumeric characters", () => {
@@ -27,7 +27,7 @@ describe("parseAirportList", () => {
 
   it("caps at 12 airports", () => {
     var codes = []
-    for (var i = 0; i < 15; i++) codes.push("AB" + (100 + i))
+    for (var i = 0; i < 15; i++) codes.push("A" + String(i).padStart(3, "0"))
     var result = M.parseAirportList(codes.join(","))
     assert.equal(result.length, 12)
   })

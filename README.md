@@ -139,7 +139,7 @@ Set these from Setup → Plugins in the Omarchy menu, or inline in
 
 | Key                        | Type    | Default            | Notes                                                                    |
 |-----------------------------|---------|--------------------|---------------------------------------------------------------------------|
-| `airports`                  | string  | `EBAW,EBBR,EBCI`   | Comma-separated ICAO codes, in display order                             |
+| `airports`                  | string  | `EBAW,EBBR,EBCI`   | Comma-separated ICAO codes (exactly 4 characters each), in display order |
 | `units`                     | enum    | `Metric`           | `Metric` (°C, km, hPa) or `Imperial` (°F, mi, inHg) — see units note above |
 | `showTaf`                   | boolean | `true`             | Include the TAF under each station's METAR                               |
 | `refreshMinutes`            | integer | `10`               | How often to re-fetch (5–60 min)                                         |

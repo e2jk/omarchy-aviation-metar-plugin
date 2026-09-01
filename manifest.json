@@ -21,7 +21,7 @@
         "type": "string",
         "label": "Airports (ICAO)",
         "defaultValue": "EBAW,EBBR,EBCI",
-        "description": "Comma-separated ICAO station identifiers, e.g. EBAW,EBBR,EBCI"
+        "description": "Comma-separated ICAO station identifiers (exactly 4 characters each), e.g. EBAW,EBBR,EBCI"
       },
       {
         "key": "units",

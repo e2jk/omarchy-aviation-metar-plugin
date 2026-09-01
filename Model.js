@@ -3,13 +3,17 @@
 // Kept dependency-free (no QML imports) so it can be unit tested with plain
 // node/qmljs if desired.
 
+// ICAO airport identifiers are always exactly 4 alphanumeric characters —
+// not "usually" 4, structurally always (https://en.wikipedia.org/wiki/ICAO_airport_code).
+// A shorter or longer string can never be one, so it's rejected here rather
+// than sent to the API to fail there.
 function parseAirportList(raw) {
   var parts = String(raw || "").split(/[,\s]+/)
   var seen = {}
   var out = []
   for (var i = 0; i < parts.length; i++) {
     var code = parts[i].replace(/^\s+|\s+$/g, "").toUpperCase()
-    if (code.length < 3 || code.length > 5) continue
+    if (code.length !== 4) continue
     if (!/^[A-Z0-9]+$/.test(code)) continue
     if (seen[code]) continue
     seen[code] = true

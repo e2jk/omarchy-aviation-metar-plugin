@@ -63,7 +63,7 @@ Panel {
   readonly property var airportList: Model.parseAirportList(airportsRaw)
   readonly property bool imperial: setting("units", "Metric") === "Imperial"
   readonly property bool showTaf: setting("showTaf", true) === true
-  readonly property int refreshMinutes: Math.max(5, parseInt(setting("refreshMinutes", 10), 10) || 10)
+  readonly property int refreshMinutes: Math.max(5, Math.min(60, parseInt(setting("refreshMinutes", 10), 10) || 10))
   readonly property bool showStationNameInTooltip: setting("showStationNameInTooltip", true) === true
   // Decoded English is the default (friendlier for anyone who doesn't read
   // METAR groups); hovering the report always reveals whichever form isn't
