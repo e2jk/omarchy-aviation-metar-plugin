@@ -200,7 +200,9 @@ npm test    # runs the suite, fails if line/branch/function coverage < 100%
 that runs the same suite and blocks the push if it fails. It currently takes
 well under a second, so it's a hard gate rather than advisory; if the suite
 ever grows slow enough to be friction, that's worth revisiting rather than
-just dropping the check.
+just dropping the check. Quiet on success (just the test-count/coverage
+summary, not every individual test name) — a failure prints everything, so
+it stays fully diagnosable when it actually matters.
 
 The QML files (`BarWidget.qml`, `Panel.qml`) aren't covered by automated
 tests — there's no QML test harness set up for this repo. Changes there are

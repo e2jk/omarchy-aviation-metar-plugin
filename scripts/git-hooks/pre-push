@@ -5,6 +5,10 @@
 # (a few hundred ms) so it's fine as a hard gate; if the suite grows slow
 # enough that this becomes friction, revisit the strategy (see issue #1)
 # before just deleting the check.
+#
+# Quiet on success (just the test-count + coverage summary node's runner
+# prints, not every individual test name); the full output only shows up
+# when something actually needs diagnosing.
 
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
@@ -14,10 +18,16 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 0
 fi
 
-npm test
+output=$(mktemp) || exit 1
+trap 'rm -f "$output"' EXIT
+
+npm test > "$output" 2>&1
 status=$?
 
-if [ "$status" -ne 0 ]; then
+if [ "$status" -eq 0 ]; then
+  grep '^ℹ ' "$output"
+else
+  cat "$output"
   echo "pre-push: test suite failed (or coverage dropped below 100%) — push aborted" >&2
 fi
 
