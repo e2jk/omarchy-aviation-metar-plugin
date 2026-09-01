@@ -666,6 +666,28 @@ Panel {
               }
             }
           }
+
+          // ---- Attribution. The README credits the data source too, but
+          // that's invisible to anyone who only ever sees the bar/popup.
+          Text {
+            id: attribution
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: "Data: aviationweather.gov"
+            color: attributionArea.containsMouse ? Qt.darker(root.bar.foreground, 1.2) : Qt.darker(root.bar.foreground, 1.6)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            font.underline: attributionArea.containsMouse
+
+            MouseArea {
+              id: attributionArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: Qt.openUrlExternally("https://aviationweather.gov")
+            }
+          }
         }
       }
     }
