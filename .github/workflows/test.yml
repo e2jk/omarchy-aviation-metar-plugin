@@ -17,19 +17,16 @@ jobs:
       - name: Install qmllint
         run: sudo apt-get update && sudo apt-get install -y qt6-declarative-dev-tools
       - name: qmllint
-        # Quickshell's qs.* namespace and Process's signal typing aren't
-        # resolvable without its full build (not available here, or in the
-        # pre-push hook's equivalent invocation), so those specific
-        # categories are suppressed — see the README's Development section.
-        run: |
-          /usr/lib/qt6/bin/qmllint \
-            --import disable --unresolved-type disable --missing-property disable \
-            --inheritance-cycle disable --unqualified disable --signal-handler-parameters disable \
-            BarWidget.qml Panel.qml
+        # Which categories to suppress, and detecting which of those this
+        # Qt version's qmllint actually supports (varies — Ubuntu 24.04
+        # packages Qt 6.4.2, older than a typical dev machine's), lives in
+        # scripts/run-qmllint.sh — one shared place, not copy-pasted here
+        # and in the pre-push hook.
+        run: scripts/run-qmllint.sh
 
       - name: Validate manifest.json
         run: scripts/validate-manifest.sh
 
       # Pre-installed on GitHub's ubuntu-latest runners, no setup needed.
       - name: shellcheck
-        run: shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh
+        run: shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh

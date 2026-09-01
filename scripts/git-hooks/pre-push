@@ -46,26 +46,11 @@ else
   echo "pre-push: npm not found, skipping test suite" >&2
 fi
 
-# ---- 2. QML lint. Quickshell's qs.* namespace and Process's signal typing
-#         aren't resolvable without its full build (not just this repo's
-#         files), so those specific categories are suppressed — see the
-#         README's Development section for what was verified about each one.
-if command -v qmllint >/dev/null 2>&1; then
-  qmllint_bin=qmllint
-elif [ -x /usr/lib/qt6/bin/qmllint ]; then
-  qmllint_bin=/usr/lib/qt6/bin/qmllint
-else
-  qmllint_bin=""
-fi
-
-if [ -n "$qmllint_bin" ]; then
-  run_check "qmllint" "$qmllint_bin" \
-    --import disable --unresolved-type disable --missing-property disable \
-    --inheritance-cycle disable --unqualified disable --signal-handler-parameters disable \
-    BarWidget.qml Panel.qml
-else
-  echo "pre-push: qmllint not found, skipping QML lint" >&2
-fi
+# ---- 2. QML lint. Logic (which categories to suppress and why, and
+#         detecting which of those a given Qt version's qmllint actually
+#         supports) lives in scripts/run-qmllint.sh — the one place it's
+#         defined, shared with CI, rather than copy-pasted per caller.
+run_check "qmllint" scripts/run-qmllint.sh
 
 # ---- 3. Manifest shape — portable (no Omarchy install required), runs
 #         everywhere including CI.
@@ -84,10 +69,10 @@ fi
 #         official image instead with zero installed footprint; CI gets it
 #         for free since ubuntu-latest ships shellcheck pre-installed.
 if command -v shellcheck >/dev/null 2>&1; then
-  run_check "shellcheck" shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh
+  run_check "shellcheck" shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh
 elif command -v docker >/dev/null 2>&1; then
   run_check "shellcheck (docker)" docker run --rm -v "$repo_root:/mnt:ro" -w /mnt \
-    koalaman/shellcheck:stable scripts/git-hooks/pre-push scripts/validate-manifest.sh
+    koalaman/shellcheck:stable scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh
 else
   echo "pre-push: shellcheck not found (and no docker to run it via container), skipping" >&2
 fi
