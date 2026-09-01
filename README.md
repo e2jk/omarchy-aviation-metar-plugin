@@ -197,15 +197,27 @@ npm test    # runs the suite, fails if line/branch/function coverage < 100%
 ```
 
 `npm install` wires up a `pre-push` git hook (`scripts/git-hooks/pre-push`)
-that runs the same suite and blocks the push if it fails. It currently takes
-well under a second, so it's a hard gate rather than advisory; if the suite
-ever grows slow enough to be friction, that's worth revisiting rather than
-just dropping the check. Quiet on success (just the test-count/coverage
-summary, not every individual test name) — a failure prints everything, so
-it stays fully diagnosable when it actually matters.
+that blocks the push if any of the following fail — the same checks run in
+`.github/workflows/test.yml`. All of it currently takes well under a
+second, so it's a hard gate rather than advisory; if that ever grows slow
+enough to be friction, that's worth revisiting rather than just dropping a
+check. Every check runs even after an earlier one fails, so one push
+attempt surfaces everything wrong at once. Quiet on success — a one-line
+`ok: <check>` (plus the test suite's own count/coverage summary, the one
+thing worth seeing in full even when it passes); a failing check always
+prints its full output, so it stays fully diagnosable.
 
-The QML files (`BarWidget.qml`, `Panel.qml`) aren't covered by automated
-tests — there's no QML test harness set up for this repo. Changes there are
+| Check | What | Locally when unavailable |
+|---|---|---|
+| `npm test` | The suite above, 100% coverage enforced | Skipped with a note if `npm` isn't found |
+| `qmllint` | QML syntax/lint on `BarWidget.qml`/`Panel.qml` (Quickshell's `qs.*` namespace and `Process`'s signal typing aren't resolvable without its full build, so those specific categories are suppressed) | Skipped with a note if not found (checks both `qmllint` on `PATH` and Qt6's usual `/usr/lib/qt6/bin/qmllint`) |
+| `scripts/validate-manifest.sh` | Portable manifest.json schema check (valid JSON, `schemaVersion`, required fields, entry points exist, id not in the reserved `omarchy.*` namespace) — no Omarchy install required, so it's what actually runs in CI | Always runs |
+| `omarchy plugin validate` | The real, stricter Omarchy validator (symlinks, exact entry-point safety, ...) | Only runs if the `omarchy` CLI is present (i.e. on an actual Omarchy machine) — CI can't run this one |
+| `shellcheck` | Lints this hook and the manifest validator script themselves | Skipped with a note if not installed; pre-installed on GitHub's `ubuntu-latest` runners, so CI always runs it |
+
+The QML files (`BarWidget.qml`, `Panel.qml`) aren't covered by the `Model.js`
+unit-test suite — there's no QML test harness set up for this repo, `qmllint`
+above is static analysis, not behavioral testing. Behavior changes there are
 verified by hand: symlink into `~/.config/omarchy/plugins/metar-taf`,
 `omarchy-shell shell rescanPlugins` (`.qml` changes) or
 `omarchy-restart-shell` (`Model.js` changes — QML caches imported JS modules

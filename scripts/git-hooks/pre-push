@@ -1,34 +1,91 @@
 #!/bin/sh
-# Blocks a push if the test suite (or its 100% coverage requirement) fails.
-# Installed automatically by `npm install` (see package.json's "prepare"
-# script, which points core.hooksPath at this directory). Runs fast today
-# (a few hundred ms) so it's fine as a hard gate; if the suite grows slow
-# enough that this becomes friction, revisit the strategy (see issue #1)
-# before just deleting the check.
-#
-# Quiet on success (just the test-count + coverage summary node's runner
-# prints, not every individual test name); the full output only shows up
-# when something actually needs diagnosing.
+# Blocks a push if any of these checks fail. Installed automatically by
+# `npm install` (package.json's "prepare" script sets core.hooksPath here).
+# Runs every check even after one fails, so a single push attempt surfaces
+# everything wrong at once rather than making you fix-and-repush repeatedly.
+# Quiet on success (a one-line "ok" per check, plus the test suite's own
+# count/coverage summary); a failing check always prints its full output, so
+# it stays fully diagnosable. The same checks run in .github/workflows/test.yml.
 
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "pre-push: npm not found, skipping test suite" >&2
-  exit 0
-fi
+overall_status=0
 
-output=$(mktemp) || exit 1
-trap 'rm -f "$output"' EXIT
+# Runs "$@", printing "ok: $1" on success or the full captured output (then
+# marking the push as failed) otherwise. Doesn't stop at the first failure.
+run_check() {
+  name="$1"
+  shift
+  output=$(mktemp) || { echo "pre-push: could not create a temp file" >&2; overall_status=1; return; }
+  if "$@" > "$output" 2>&1; then
+    echo "ok: $name"
+  else
+    echo "FAILED: $name" >&2
+    cat "$output" >&2
+    overall_status=1
+  fi
+  rm -f "$output"
+}
 
-npm test > "$output" 2>&1
-status=$?
-
-if [ "$status" -eq 0 ]; then
-  grep '^ℹ ' "$output"
+# ---- 1. Test suite, 100% coverage required. Own summary (not run_check's
+#         generic one-liner) since the count/coverage numbers are the point.
+if command -v npm >/dev/null 2>&1; then
+  test_output=$(mktemp) || { echo "pre-push: could not create a temp file" >&2; overall_status=1; }
+  if [ -n "$test_output" ]; then
+    if npm test > "$test_output" 2>&1; then
+      grep '^ℹ ' "$test_output"
+    else
+      cat "$test_output"
+      echo "pre-push: test suite failed (or coverage dropped below 100%)" >&2
+      overall_status=1
+    fi
+    rm -f "$test_output"
+  fi
 else
-  cat "$output"
-  echo "pre-push: test suite failed (or coverage dropped below 100%) — push aborted" >&2
+  echo "pre-push: npm not found, skipping test suite" >&2
 fi
 
-exit "$status"
+# ---- 2. QML lint. Quickshell's qs.* namespace and Process's signal typing
+#         aren't resolvable without its full build (not just this repo's
+#         files), so those specific categories are suppressed — see the
+#         README's Development section for what was verified about each one.
+if command -v qmllint >/dev/null 2>&1; then
+  qmllint_bin=qmllint
+elif [ -x /usr/lib/qt6/bin/qmllint ]; then
+  qmllint_bin=/usr/lib/qt6/bin/qmllint
+else
+  qmllint_bin=""
+fi
+
+if [ -n "$qmllint_bin" ]; then
+  run_check "qmllint" "$qmllint_bin" \
+    --import disable --unresolved-type disable --missing-property disable \
+    --inheritance-cycle disable --unqualified disable --signal-handler-parameters disable \
+    BarWidget.qml Panel.qml
+else
+  echo "pre-push: qmllint not found, skipping QML lint" >&2
+fi
+
+# ---- 3. Manifest shape — portable (no Omarchy install required), runs
+#         everywhere including CI.
+run_check "manifest shape" scripts/validate-manifest.sh
+
+# ---- 4. The real Omarchy validator, when available — stricter than #3
+#         (entry point files, reserved-namespace id check, no symlinks, ...).
+if command -v omarchy >/dev/null 2>&1; then
+  run_check "omarchy plugin validate" omarchy plugin validate .
+fi
+
+# ---- 5. Shellcheck this hook and the manifest validator.
+if command -v shellcheck >/dev/null 2>&1; then
+  run_check "shellcheck" shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh
+else
+  echo "pre-push: shellcheck not found, skipping" >&2
+fi
+
+if [ "$overall_status" -ne 0 ]; then
+  echo "pre-push: one or more checks failed — push aborted" >&2
+fi
+
+exit "$overall_status"

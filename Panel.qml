@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -259,7 +258,7 @@ Panel {
   Process {
     id: metarProc
     stdout: StdioCollector { id: metarStdout; waitForEnd: true }
-    onExited: function(exitCode) {
+    onExited: function(exitCode, exitStatus) {
       // curl -f fails (nonzero) on a transport error or an HTTP error
       // status — that's the only case worth retrying/going offline over.
       // A *successful* request (exit 0) with an empty body happens for a
@@ -306,7 +305,7 @@ Panel {
   Process {
     id: tafProc
     stdout: StdioCollector { id: tafStdout; waitForEnd: true }
-    onExited: function(exitCode) {
+    onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) { root.scheduleTafRetry(); return }
 
       var raw = String(tafStdout.text || "").trim()
