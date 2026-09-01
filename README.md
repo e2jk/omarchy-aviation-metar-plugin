@@ -15,7 +15,7 @@ Mon 31 Aug 18:06   V V V
 Click opens a popup with one card per airport — decoded stats, and the
 METAR/TAF report itself (coded or decoded, your choice — see below).
 
-![The detail popup, showing three airport cards](docs/screenshot.png)
+![The detail popup, showing three airport cards](preview.png)
 
 ## Why letters, not colors
 
