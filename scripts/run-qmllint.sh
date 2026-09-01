@@ -1,20 +1,31 @@
 #!/bin/bash
-# Runs qmllint on this plugin's QML files, suppressing exactly the warning
-# categories that are false positives here: Quickshell's qs.* namespace and
-# base types (BarWidget, Panel, ...) aren't resolvable without Quickshell's
-# own build, not something a -I path fixes (see the README's Development
-# section for what was verified about each category).
+# Runs qmllint on this plugin's QML files, treating every semantic/type
+# warning category as non-fatal ("info") — actual syntax errors (a
+# separate, non-leveled mechanism; only -s/--silent affects them, which
+# this deliberately never passes) stay fully fatal.
 #
-# Which of those category flags actually exist varies by Qt version — CI's
-# Ubuntu-packaged qmllint (Qt 6.4.2 on 24.04) is noticeably older than a
-# typical Omarchy machine's (Qt 6.11+), and doesn't recognize all of them.
-# Detecting support via --help rather than hardcoding a fixed list is the
-# whole point of this being one shared script instead of the same flags
-# copy-pasted into the pre-push hook and the CI workflow: that duplication
-# is exactly how this broke the first time (only ever tested against one
-# Qt version). A category this qmllint doesn't know about isn't something
-# it can generate warnings for in the first place, so leaving it off the
-# command line rather than erroring is the correct behavior, not a gap.
+# Why every category, not just a known-noisy subset: Quickshell's qs.*
+# namespace and base types (BarWidget, Panel, ...) aren't resolvable
+# without Quickshell's own build, so essentially any type/property-aware
+# check can misfire on this codebase — not a fixed, enumerable set. Trying
+# to hardcode "the noisy ones" already broke pre-push/CI twice:
+#   1. The exact flag set differs by Qt version (CI's Ubuntu 24.04 package
+#      is Qt 6.4.2, well behind a typical dev machine's 6.11+) — some
+#      flags this repo used didn't exist yet in 6.4.2 at all.
+#   2. Worse: some checks aren't even *missing* in 6.4.2, they're the same
+#      check under a different flag name — "missing-property" is called
+#      "property" there, "unresolved-type" is "type", the same for
+#      "signal-handler-parameters" vs "signal" — so detecting "does this
+#      exact flag name exist" and skipping it when absent isn't enough;
+#      the check still ran under its old name, at whatever default level
+#      that Qt version uses (verified: 6.4.2 has no separate error/warning
+#      distinction with a max-warnings threshold like 6.11+ does — its
+#      "warning" level fails immediately on any occurrence).
+# Extracting every "--<category> <level>" option qmllint itself reports via
+# --help, and forcing all of them to "info", is what actually survives that
+# kind of version drift: it doesn't matter what a category is named or
+# whether it exists in a given build, because every category actually
+# offered gets covered, automatically.
 
 set -euo pipefail
 
@@ -31,13 +42,12 @@ else
 fi
 
 help_output=$("$qmllint_bin" --help 2>&1 || true)
+mapfile -t categories < <(grep -oE '^[[:space:]]*(-[^,[:space:]],[[:space:]]*)?--[a-zA-Z-]+ <level>' <<< "$help_output" \
+  | grep -oE -- '--[a-zA-Z-]+')
 
-categories=(import unresolved-type missing-property inheritance-cycle unqualified signal-handler-parameters)
 flags=()
 for category in "${categories[@]}"; do
-  if grep -q -- "--$category " <<< "$help_output"; then
-    flags+=(--"$category" disable)
-  fi
+  flags+=("$category" info)
 done
 
 "$qmllint_bin" "${flags[@]}" BarWidget.qml Panel.qml
