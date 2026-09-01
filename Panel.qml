@@ -664,6 +664,15 @@ Panel {
                 }
                 ToolTip {
                   id: metarToolTip
+                  // Cursor-relative, not the Popup default of anchoring at
+                  // this Text item's own (0,0) — which put the tooltip at a
+                  // different spot per airport card purely because each
+                  // block sits at a different offset in the popup, not
+                  // because of anything about where you're actually
+                  // pointing. HoverHandler's point.position already tracks
+                  // the cursor continuously while hovering.
+                  x: metarHover.point.position.x + 16
+                  y: metarHover.point.position.y + 16
                   visible: metarHover.hovered && card.metar !== null
                   delay: 300
                   width: Style.space(360)
@@ -731,6 +740,8 @@ Panel {
                   }
                   ToolTip {
                     id: tafToolTip
+                    x: tafHover.point.position.x + 16
+                    y: tafHover.point.position.y + 16
                     visible: tafHover.hovered && card.taf !== null
                     delay: 300
                     width: Style.space(360)
