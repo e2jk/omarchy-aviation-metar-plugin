@@ -77,11 +77,19 @@ if command -v omarchy >/dev/null 2>&1; then
   run_check "omarchy plugin validate" omarchy plugin validate .
 fi
 
-# ---- 5. Shellcheck this hook and the manifest validator.
+# ---- 5. Shellcheck this hook and the manifest validator. Not installed as
+#         a system package on purpose — its actual dependency chain (a full
+#         GHC/Haskell runtime) is ~200MB installed for linting two small
+#         scripts. docker, already present for other things, runs the
+#         official image instead with zero installed footprint; CI gets it
+#         for free since ubuntu-latest ships shellcheck pre-installed.
 if command -v shellcheck >/dev/null 2>&1; then
   run_check "shellcheck" shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh
+elif command -v docker >/dev/null 2>&1; then
+  run_check "shellcheck (docker)" docker run --rm -v "$repo_root:/mnt:ro" -w /mnt \
+    koalaman/shellcheck:stable scripts/git-hooks/pre-push scripts/validate-manifest.sh
 else
-  echo "pre-push: shellcheck not found, skipping" >&2
+  echo "pre-push: shellcheck not found (and no docker to run it via container), skipping" >&2
 fi
 
 if [ "$overall_status" -ne 0 ]; then
