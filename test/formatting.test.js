@@ -221,3 +221,54 @@ describe("formatAge", () => {
     assert.equal(M.formatAge(120), "2h")
   })
 })
+
+describe("isSameLocalDay", () => {
+  it("is true for two timestamps on the same calendar day", () => {
+    var morning = new Date(2026, 0, 15, 8, 0, 0).getTime() / 1000
+    var evening = new Date(2026, 0, 15, 23, 0, 0).getTime() / 1000
+    assert.equal(M.isSameLocalDay(morning, evening), true)
+  })
+
+  it("is false across a day boundary, even close in time", () => {
+    var lateNight = new Date(2026, 0, 15, 23, 59, 0).getTime() / 1000
+    var earlyNext = new Date(2026, 0, 16, 0, 1, 0).getTime() / 1000
+    assert.equal(M.isSameLocalDay(lateNight, earlyNext), false)
+  })
+
+  it("is false across a month/year boundary", () => {
+    var dec31 = new Date(2025, 11, 31, 12, 0, 0).getTime() / 1000
+    var jan1 = new Date(2026, 0, 1, 12, 0, 0).getTime() / 1000
+    assert.equal(M.isSameLocalDay(dec31, jan1), false)
+  })
+})
+
+describe("lastUpdatedTier", () => {
+  it("returns tier 'none' when there's no last-updated time yet", () => {
+    assert.deepEqual(M.lastUpdatedTier(0, 1000), { tier: "none", minutes: null })
+    assert.deepEqual(M.lastUpdatedTier(null, 1000), { tier: "none", minutes: null })
+  })
+
+  it("returns 'justNow' under a minute", () => {
+    var now = Math.floor(Date.now() / 1000)
+    assert.equal(M.lastUpdatedTier(now - 30, now).tier, "justNow")
+  })
+
+  it("returns 'minutesAgo' with a rounded minute count from 1 up to (not including) 5 minutes", () => {
+    var now = Math.floor(Date.now() / 1000)
+    var result = M.lastUpdatedTier(now - 150, now) // 2.5 min -> rounds to 3
+    assert.equal(result.tier, "minutesAgo")
+    assert.equal(result.minutes, 3)
+  })
+
+  it("returns 'today' from 5 minutes up to the next local-day boundary", () => {
+    var now = new Date(2026, 0, 15, 12, 0, 0).getTime() / 1000
+    var earlierToday = new Date(2026, 0, 15, 8, 0, 0).getTime() / 1000
+    assert.equal(M.lastUpdatedTier(earlierToday, now).tier, "today")
+  })
+
+  it("returns 'other' once it's a different calendar day", () => {
+    var now = new Date(2026, 0, 15, 8, 0, 0).getTime() / 1000
+    var yesterday = new Date(2026, 0, 14, 20, 0, 0).getTime() / 1000
+    assert.equal(M.lastUpdatedTier(yesterday, now).tier, "other")
+  })
+})

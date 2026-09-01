@@ -242,6 +242,20 @@ Panel {
     return Qt.formatDateTime(new Date(seconds * 1000), "ddd HH:mm")
   }
 
+  // Header text for "when was this last refreshed" — closer readings get
+  // more specific phrasing (see Model.lastUpdatedTier for the tier
+  // decision; this only turns that into words, since Qt.formatDateTime for
+  // a correct clock time / weekday name isn't available to Model.js).
+  function formatLastUpdated() {
+    var info = Model.lastUpdatedTier(root.lastUpdated, root.nowTick)
+    if (info.tier === "none") return ""
+    var clock = Qt.formatDateTime(new Date(root.lastUpdated * 1000), "HH:mm")
+    if (info.tier === "justNow") return "Updated just now"
+    if (info.tier === "minutesAgo") return "Updated " + info.minutes + " min ago (" + clock + ")"
+    if (info.tier === "today") return "Updated Today " + clock
+    return "Updated " + Qt.formatDateTime(new Date(root.lastUpdated * 1000), "dddd") + " " + clock
+  }
+
   Process {
     id: metarProc
     stdout: StdioCollector { id: metarStdout; waitForEnd: true }
@@ -401,7 +415,7 @@ Panel {
 
               Text {
                 textFormat: Text.PlainText
-                text: root.loading ? "Updating…" : (root.lastUpdated > 0 ? "Updated " + root.formatEpoch(root.lastUpdated) : "")
+                text: root.loading ? "Updating…" : root.formatLastUpdated()
                 color: Qt.darker(root.bar.foreground, 1.5)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.bodySmall

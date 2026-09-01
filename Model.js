@@ -530,6 +530,29 @@ function formatAge(minutes) {
   return h + "h" + (rem > 0 ? " " + rem + "min" : "")
 }
 
+function isSameLocalDay(aSeconds, bSeconds) {
+  var a = new Date(aSeconds * 1000)
+  var b = new Date(bSeconds * 1000)
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+// Decides how the popup header should phrase "when was this last
+// refreshed" — deliberately just the decision, not the final string: this
+// file has no access to Qt.formatDateTime, which is what a correct clock
+// time or locale weekday name needs (see Panel.qml's formatLastUpdated,
+// which turns this into text). Tiers, closest-first: under a minute reads
+// as "just now"; under 5 minutes as "N min ago"; same calendar day (in the
+// viewer's local time — that's what new Date()'s getFullYear/Month/Date
+// give, deliberately not UTC) as "today"; anything older names the day.
+function lastUpdatedTier(lastUpdatedSeconds, nowSeconds) {
+  if (!lastUpdatedSeconds) return { tier: "none", minutes: null }
+  var minutes = (nowSeconds - lastUpdatedSeconds) / 60
+  if (minutes < 1) return { tier: "justNow", minutes: minutes }
+  if (minutes < 5) return { tier: "minutesAgo", minutes: Math.round(minutes) }
+  if (isSameLocalDay(lastUpdatedSeconds, nowSeconds)) return { tier: "today", minutes: minutes }
+  return { tier: "other", minutes: minutes }
+}
+
 // status: { loading, everSucceeded, offline, nowSeconds, maxAgeMinutes, everSeenIcaos }
 //   loading       — a manual refresh is in flight; shown as a transient dash
 //                   so pressing refresh visibly does something.
@@ -662,6 +685,8 @@ if (typeof module !== "undefined") {
     parseVisibilityFromTafSegment: parseVisibilityFromTafSegment,
     ageMinutes: ageMinutes,
     formatAge: formatAge,
+    isSameLocalDay: isSameLocalDay,
+    lastUpdatedTier: lastUpdatedTier,
     ceilingFtFromClouds: ceilingFtFromClouds,
     classifyFlightCategory: classifyFlightCategory,
     categoryForMetar: categoryForMetar,
