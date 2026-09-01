@@ -21,17 +21,20 @@ Panel {
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
 
+  // Deliberately no refresh() here: a click is preceded by a hover, and the
+  // hover already refreshed if the data was actually stale (see
+  // refreshIfStale/hoverRefreshMinutes) — an unconditional refresh on open
+  // would just be a second, redundant fetch every single time the popup is
+  // opened, whether or not anything needed refreshing.
   function open() {
     openedFromHotkey = false
     setCenterHoverRevealSuppressed(false)
     root.controller.show()
-    root.refresh()
   }
 
   function openFromHotkey() {
     openedFromHotkey = true
     root.controller.show()
-    root.refresh()
     Qt.callLater(function() {
       if (root.opened) setCenterHoverRevealSuppressed(true)
     })
