@@ -61,6 +61,10 @@ Panel {
   // ---- Configuration, read live from the widget's shell.json entry.
   readonly property string airportsRaw: setting("airports", "EBAW,EBBR,EBCI")
   readonly property var airportList: Model.parseAirportList(airportsRaw)
+  // Entries in `airports` that were silently dropped for being the wrong
+  // shape (not exactly 4 alphanumeric characters) — surfaced in the popup
+  // so a typo doesn't just make a station quietly vanish with no explanation.
+  readonly property var invalidAirportEntries: Model.invalidAirportEntries(airportsRaw)
   readonly property bool imperial: setting("units", "Metric") === "Imperial"
   readonly property bool showTaf: setting("showTaf", true) === true
   readonly property int refreshMinutes: Math.max(5, Math.min(60, parseInt(setting("refreshMinutes", 10), 10) || 10))
@@ -93,6 +97,11 @@ Panel {
   property double lastUpdated: 0
   property int metarRetries: 0
   property int tafRetries: 0
+  // Every ICAO code that has appeared in any successful fetch this session.
+  // Unlike metarByIcao (replaced fresh each fetch), this only ever grows —
+  // it's what tells "never once a real station" apart from "just missing
+  // from the latest response" in buildEntries.
+  property var everSeenIcaos: ({})
 
   // Set once the very first fetch ever completes successfully; used to tell
   // "still loading for the first time" apart from "reachable but no data for
@@ -114,7 +123,8 @@ Panel {
     everSucceeded: root.metarEverSucceeded,
     offline: root.metarOffline,
     nowSeconds: root.nowTick,
-    maxAgeMinutes: root.maxAgeMinutes
+    maxAgeMinutes: root.maxAgeMinutes,
+    everSeenIcaos: root.everSeenIcaos
   })
   readonly property string summary: Model.summaryLine(entries)
   readonly property bool loading: metarProc.running || (root.showTaf && tafProc.running)
@@ -180,23 +190,41 @@ Panel {
 
   Process {
     id: metarProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var raw = String(text || "").trim()
-        if (!raw) { root.scheduleMetarRetry(); return }
+    stdout: StdioCollector { id: metarStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      // curl -f fails (nonzero) on a transport error or an HTTP error
+      // status — that's the only case worth retrying/going offline over.
+      // A *successful* request (exit 0) with an empty body happens for a
+      // real reason: aviationweather.gov returns HTTP 204 with no content
+      // when every requested id is unrecognized (verified live against
+      // https://aviationweather.gov/api/data/metar?ids=ZZZZ). Treating
+      // that as a transient failure would misreport "your airport list is
+      // invalid" as "we're offline" after retries exhaust.
+      if (exitCode !== 0) { root.scheduleMetarRetry(); return }
+
+      var raw = String(metarStdout.text || "").trim()
+      var parsed = []
+      if (raw) {
         try {
-          var parsed = JSON.parse(raw)
-          root.metarByIcao = Model.buildByIcao(parsed)
-          root.metarRetries = 0
-          root.metarEverSucceeded = true
-          root.metarOffline = false
-          root.manualRefreshInFlight = false
-          root.lastUpdated = Date.now() / 1000
+          parsed = JSON.parse(raw)
         } catch (e) {
           root.scheduleMetarRetry()
+          return
         }
       }
+
+      root.metarByIcao = Model.buildByIcao(parsed)
+      // Reassign (not mutate-in-place) so the `entries` binding, which
+      // reads this property, actually re-evaluates.
+      var seen = {}
+      for (var prevIcao in root.everSeenIcaos) seen[prevIcao] = true
+      for (var icao in root.metarByIcao) seen[icao] = true
+      root.everSeenIcaos = seen
+      root.metarRetries = 0
+      root.metarEverSucceeded = true
+      root.metarOffline = false
+      root.manualRefreshInFlight = false
+      root.lastUpdated = Date.now() / 1000
     }
   }
 
@@ -208,19 +236,23 @@ Panel {
 
   Process {
     id: tafProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var raw = String(text || "").trim()
-        if (!raw) { root.scheduleTafRetry(); return }
+    stdout: StdioCollector { id: tafStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) { root.scheduleTafRetry(); return }
+
+      var raw = String(tafStdout.text || "").trim()
+      var parsed = []
+      if (raw) {
         try {
-          var parsed = JSON.parse(raw)
-          root.tafByIcao = Model.buildByIcao(parsed)
-          root.tafRetries = 0
+          parsed = JSON.parse(raw)
         } catch (e) {
           root.scheduleTafRetry()
+          return
         }
       }
+
+      root.tafByIcao = Model.buildByIcao(parsed)
+      root.tafRetries = 0
     }
   }
 
@@ -363,6 +395,25 @@ Panel {
             font.italic: true
             anchors.left: parent.left
             anchors.leftMargin: Style.space(16)
+          }
+
+          // ICAO codes are always exactly 4 characters — anything else in
+          // the `airports` setting was silently dropped by
+          // parseAirportList. Surface it instead of letting a typo just
+          // make a station vanish with no explanation.
+          Text {
+            visible: root.invalidAirportEntries.length > 0
+            text: "⚠ Ignored invalid airport code" + (root.invalidAirportEntries.length > 1 ? "s" : "")
+              + ": " + root.invalidAirportEntries.join(", ") + " (ICAO codes are exactly 4 characters)"
+            color: Qt.darker(root.bar.foreground, 1.3)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.italic: true
+            wrapMode: Text.WordWrap
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(16)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(16)
           }
 
           Repeater {

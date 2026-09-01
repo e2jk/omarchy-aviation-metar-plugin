@@ -33,6 +33,30 @@ describe("parseAirportList", () => {
   })
 })
 
+describe("invalidAirportEntries", () => {
+  it("returns [] for empty/undefined/null input", () => {
+    assert.deepEqual(M.invalidAirportEntries(""), [])
+    assert.deepEqual(M.invalidAirportEntries(undefined), [])
+    assert.deepEqual(M.invalidAirportEntries(null), [])
+  })
+
+  it("returns [] when every entry is valid", () => {
+    assert.deepEqual(M.invalidAirportEntries("EBAW,EBBR"), [])
+  })
+
+  it("reports wrong-length and non-alphanumeric entries, uppercased", () => {
+    assert.deepEqual(M.invalidAirportEntries("ab,ebawx,eb-w,EBAW"), ["AB", "EBAWX", "EB-W"])
+  })
+
+  it("ignores empty tokens from stray separators", () => {
+    assert.deepEqual(M.invalidAirportEntries("EBAW,,  ,EBBR"), [])
+  })
+
+  it("deduplicates repeated invalid entries", () => {
+    assert.deepEqual(M.invalidAirportEntries("ab,ab"), ["AB"])
+  })
+})
+
 describe("letterForCategory", () => {
   it("maps each category to its letter", () => {
     assert.equal(M.letterForCategory("VFR"), "V")

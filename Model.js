@@ -23,6 +23,27 @@ function parseAirportList(raw) {
   return out
 }
 
+// Entries from the `airports` setting that parseAirportList silently drops
+// — wrong length or non-alphanumeric — so the UI can tell the user their
+// config has a typo instead of the code just vanishing with no explanation.
+// (A valid-shaped code that isn't a real/reporting station is a different,
+// harder-to-detect-upfront case — see buildEntries's everSeenIcaos.)
+function invalidAirportEntries(raw) {
+  var parts = String(raw || "").split(/[,\s]+/)
+  var seen = {}
+  var invalid = []
+  for (var i = 0; i < parts.length; i++) {
+    var original = parts[i].replace(/^\s+|\s+$/g, "")
+    if (!original) continue
+    var code = original.toUpperCase()
+    if (code.length === 4 && /^[A-Z0-9]+$/.test(code)) continue
+    if (seen[code]) continue
+    seen[code] = true
+    invalid.push(code)
+  }
+  return invalid
+}
+
 function letterForCategory(category) {
   switch (String(category || "").toUpperCase()) {
     case "VFR": return "V"
@@ -509,7 +530,7 @@ function formatAge(minutes) {
   return h + "h" + (rem > 0 ? " " + rem + "min" : "")
 }
 
-// status: { loading, everSucceeded, offline, nowSeconds, maxAgeMinutes }
+// status: { loading, everSucceeded, offline, nowSeconds, maxAgeMinutes, everSeenIcaos }
 //   loading       — a manual refresh is in flight; shown as a transient dash
 //                   so pressing refresh visibly does something.
 //   everSucceeded — at least one fetch has ever completed successfully.
@@ -521,6 +542,13 @@ function formatAge(minutes) {
 //                   reading presented as current is worse than an honest
 //                   "nothing" — see [categoryForMetar]/README for the
 //                   fltCat/threshold logic this sits in front of.
+//   everSeenIcaos — { ICAO: true } for every code that has appeared in ANY
+//                   successful fetch this session (accumulates, never
+//                   cleared — unlike metarByIcao, which is replaced fresh
+//                   each fetch). Lets a station that's well-formed but has
+//                   simply never once been returned (typo, retired
+//                   identifier) read differently from one that's just
+//                   missing from the latest response.
 function buildEntries(airportList, metarByIcao, status) {
   status = status || {}
   var maxAge = status.maxAgeMinutes
@@ -567,9 +595,17 @@ function buildEntries(airportList, metarByIcao, status) {
       continue
     }
 
-    // A fetch has succeeded overall, just not for this station specifically
-    // — most likely an unrecognized or mistyped ICAO code.
-    out.push({ icao: icao, letter: "?", category: "Unknown station", stationName: "", metar: null, stale: false, age: null })
+    // A fetch has succeeded overall, just not for this station specifically.
+    var everSeen = !!(status.everSeenIcaos && status.everSeenIcaos[icao])
+    out.push({
+      icao: icao,
+      letter: "?",
+      category: everSeen ? "Missing from latest report" : "Unknown or invalid station",
+      stationName: "",
+      metar: null,
+      stale: false,
+      age: null
+    })
   }
   return out
 }
@@ -585,6 +621,7 @@ function summaryLine(entries) {
 if (typeof module !== "undefined") {
   module.exports = {
     parseAirportList: parseAirportList,
+    invalidAirportEntries: invalidAirportEntries,
     letterForCategory: letterForCategory,
     parseVisib: parseVisib,
     significantTokens: significantTokens,

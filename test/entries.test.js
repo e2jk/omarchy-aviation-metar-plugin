@@ -38,10 +38,16 @@ describe("buildEntries", () => {
     assert.equal(out[0].category, "Loading…")
   })
 
-  it("shows ? unknown-station once a fetch has succeeded but this code never appeared", () => {
+  it("shows 'unknown or invalid' when a code has never once appeared in a successful fetch", () => {
     var out = M.buildEntries(["EBXX"], {}, { everSucceeded: true })
     assert.equal(out[0].letter, "?")
-    assert.equal(out[0].category, "Unknown station")
+    assert.equal(out[0].category, "Unknown or invalid station")
+  })
+
+  it("shows 'missing from latest report' for a code seen before but absent this time", () => {
+    var out = M.buildEntries(["EBXX"], {}, { everSucceeded: true, everSeenIcaos: { EBXX: true } })
+    assert.equal(out[0].letter, "?")
+    assert.equal(out[0].category, "Missing from latest report")
   })
 
   it("shows the normal letter/category for a fresh, in-range station", () => {

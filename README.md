@@ -101,6 +101,24 @@ Either way the bar letter becomes `?`, and the popup still shows the
 last-known data with an explicit "last observation N ago" banner rather than
 hiding it outright — still useful context, just never presented as current.
 
+## Bad airport codes
+
+Two separate cases, told apart rather than both showing a generic `?`:
+
+- A malformed entry in `airports` (wrong length, stray characters — ICAO
+  codes are always exactly 4 alphanumeric characters) is dropped before ever
+  reaching the API, and called out with a warning banner in the popup, so a
+  typo doesn't just make a station silently vanish from the bar.
+- A correctly-shaped code that isn't a real/reporting station (typo like
+  `EBAX`, or one that's simply never been returned) shows **"Unknown or
+  invalid station."** One that *has* been seen before but is absent from the
+  latest response shows **"Missing from latest report"** instead — a fetch
+  that only ever returns your other configured airports is a real, honest
+  answer (verified live: `aviationweather.gov` returns HTTP 204 for a batch
+  request where none of the ids are recognized, and silently omits an
+  unrecognized id from an otherwise-successful multi-airport response —
+  neither case is a network failure, so neither is treated as one).
+
 ## Install
 
 ```bash
