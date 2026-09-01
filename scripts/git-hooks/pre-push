@@ -1,0 +1,24 @@
+#!/bin/sh
+# Blocks a push if the test suite (or its 100% coverage requirement) fails.
+# Installed automatically by `npm install` (see package.json's "prepare"
+# script, which points core.hooksPath at this directory). Runs fast today
+# (a few hundred ms) so it's fine as a hard gate; if the suite grows slow
+# enough that this becomes friction, revisit the strategy (see issue #1)
+# before just deleting the check.
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+cd "$repo_root" || exit 1
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-push: npm not found, skipping test suite" >&2
+  exit 0
+fi
+
+npm test
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  echo "pre-push: test suite failed (or coverage dropped below 100%) — push aborted" >&2
+fi
+
+exit "$status"

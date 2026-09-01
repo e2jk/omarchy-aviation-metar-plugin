@@ -156,7 +156,11 @@ function parseVisibilityFromTokens(tokens) {
   }
   var sm = token.match(/^([MP])?(?:(\d{1,2})(?:\/(\d))?)?SM$/)
   if (sm && (sm[2] !== undefined || whole > 0)) {
-    var num = sm[2] !== undefined ? parseInt(sm[2], 10) : 0
+    // sm[2] is always defined here: the only way to reach this branch with
+    // whole > 0 is via the split-token case above, whose own regex already
+    // requires a leading digit — so `sm[2] !== undefined` is never false
+    // when `whole > 0` is what got us in.
+    var num = parseInt(sm[2], 10)
     var den = sm[3] !== undefined ? parseInt(sm[3], 10) : 1
     var miles = whole + num / den
     return { meters: miles * 1609.344, plus: sm[1] === "P", lessThan: sm[1] === "M", cavok: false }
@@ -292,10 +296,13 @@ function formatClouds(clouds) {
       parts.push(name)
       continue
     }
-    var base = clouds[i].base
+    var base = clouds[i] ? clouds[i].base : undefined
     parts.push(name + (base !== undefined && base !== null ? " " + Math.round(base) + "ft" : ""))
   }
-  return parts.length ? parts.join(", ") : "Clear / no cloud reported"
+  // Every loop iteration above pushes exactly one entry, and the early
+  // return already handled the only way to get here with an empty list —
+  // so parts.length is always >= 1.
+  return parts.join(", ")
 }
 
 // ---- Present-weather (wxString) decoding, e.g. "SHRA", "+TSRA", "-RA",
@@ -528,12 +535,15 @@ function buildEntries(airportList, metarByIcao, status) {
     }
 
     if (status.offline || expired) {
+      // Only hint the last-known category for "offline but still within
+      // maxAgeMinutes" — an entry that has aged out is deliberately not
+      // softened with a category that may itself be long stale.
       var lastKnown = metar && !expired ? categoryForMetar(metar) : ""
       var reason = status.offline ? "offline" : "last report " + formatAge(age) + " ago"
       out.push({
         icao: icao,
         letter: "?",
-        category: metar ? "No data (" + reason + ")" : "No data",
+        category: metar ? "No data (" + reason + (lastKnown ? ", last known " + lastKnown : "") + ")" : "No data",
         stationName: "",
         metar: metar, // kept so the popup can still show it, clearly marked stale
         stale: true,

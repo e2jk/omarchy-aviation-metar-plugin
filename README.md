@@ -161,6 +161,29 @@ cross-country you're planning.
 | Hover (bar)   | Tooltip with each airport's full category and (optionally) name  |
 | Hover (report)| Reveals whichever of coded/decoded isn't the primary view        |
 
+## Development
+
+`Model.js` is plain, dependency-free JS with a full test suite (`test/`,
+using Node's built-in `node:test` — no test framework dependency):
+
+```bash
+npm test    # runs the suite, fails if line/branch/function coverage < 100%
+```
+
+`npm install` wires up a `pre-push` git hook (`scripts/git-hooks/pre-push`)
+that runs the same suite and blocks the push if it fails. It currently takes
+well under a second, so it's a hard gate rather than advisory; if the suite
+ever grows slow enough to be friction, that's worth revisiting rather than
+just dropping the check.
+
+The QML files (`BarWidget.qml`, `Panel.qml`) aren't covered by automated
+tests — there's no QML test harness set up for this repo. Changes there are
+verified by hand: symlink into `~/.config/omarchy/plugins/metar-taf`,
+`omarchy-shell shell rescanPlugins` (`.qml` changes) or
+`omarchy-restart-shell` (`Model.js` changes — QML caches imported JS modules
+independently of the component reload), and check `journalctl --user -b`
+for QML warnings.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

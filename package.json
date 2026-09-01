@@ -1,0 +1,12 @@
+{
+  "name": "omarchy-aviation-metar-plugin",
+  "private": true,
+  "description": "Test/dev tooling for the Aviation Weather (METAR/TAF) Omarchy bar plugin. The plugin itself is plain QML/JS with no runtime dependencies.",
+  "scripts": {
+    "test": "node --test --experimental-test-coverage --test-coverage-include=\"Model.js\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100",
+    "prepare": "git config core.hooksPath scripts/git-hooks"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
