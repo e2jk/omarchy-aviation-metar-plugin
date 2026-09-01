@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -253,6 +254,18 @@ Panel {
     if (info.tier === "minutesAgo") return "Updated " + info.minutes + " min ago (" + clock + ")"
     if (info.tier === "today") return "Updated Today " + clock
     return "Updated " + Qt.formatDateTime(new Date(root.lastUpdated * 1000), "dddd") + " " + clock
+  }
+
+  // Same wl-copy pattern already used elsewhere in this shell (e.g.
+  // panels/network/Panel.qml, panels/tailscale/Service.qml) — copies
+  // whatever's currently on screen (coded or decoded, following decodeStyle,
+  // same as what clicking the text visibly shows), and confirms via a
+  // desktop notification, matching how this widget's own right-click
+  // summary already works.
+  function copyToClipboard(value, label) {
+    if (!value) return
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(value) + " | wl-copy"])
+    if (root.bar) root.bar.run("omarchy-notification-send " + Util.shellQuote(label + " copied"))
   }
 
   Process {
@@ -645,13 +658,16 @@ Panel {
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
 
-                HoverHandler { id: metarHover }
+                HoverHandler { id: metarHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler {
+                  onTapped: root.copyToClipboard(metarText.text, card.modelData.icao + " METAR")
+                }
                 ToolTip {
                   id: metarToolTip
                   visible: metarHover.hovered && card.metar !== null
                   delay: 300
                   width: Style.space(360)
-                  text: card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : ""
+                  text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : "") + "\n\nClick to copy"
                   contentItem: Text {
                     width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
                     textFormat: Text.PlainText
@@ -708,13 +724,16 @@ Panel {
                   wrapMode: Text.WordWrap
                   width: parent.width
 
-                  HoverHandler { id: tafHover }
+                  HoverHandler { id: tafHover; cursorShape: Qt.PointingHandCursor }
+                  TapHandler {
+                    onTapped: root.copyToClipboard(tafText.text, card.modelData.icao + " TAF")
+                  }
                   ToolTip {
                     id: tafToolTip
                     visible: tafHover.hovered && card.taf !== null
                     delay: 300
                     width: Style.space(360)
-                    text: card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : ""
+                    text: (card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : "") + "\n\nClick to copy"
                     contentItem: Text {
                       width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText

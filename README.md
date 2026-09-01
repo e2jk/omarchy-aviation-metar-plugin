@@ -179,6 +179,7 @@ cross-country you're planning.
 | Right click   | Send a desktop notification with a one-line summary              |
 | Hover (bar)   | Tooltip with each airport's full category and (optionally) name  |
 | Hover (report)| Reveals whichever of coded/decoded isn't the primary view        |
+| Click (report)| Copies that station's METAR or TAF (whichever block was clicked, exactly as currently displayed — coded or decoded, following `decodeStyle`) to the clipboard, with a desktop notification confirming it |
 
 Hovering the bar also refreshes in the background if the data is older than
 `hoverRefreshMinutes` (default 2 min) — silently. It only becomes visible
