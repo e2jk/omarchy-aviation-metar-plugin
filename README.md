@@ -88,9 +88,15 @@ Aviation weather is hyper-local and changes fast, so this plugin would
 rather show nothing than something that might be an hour old and wrong. Two
 independent checks feed into that:
 
-- **Reachability** — if a fetch (including its retries) fails outright, the
-  affected stations show `?` rather than silently keep displaying whatever
-  was last cached.
+- **Reachability** — if a fetch fails, it retries a few times a few seconds
+  apart (catches a one-off blip fast); if those also fail, the affected
+  stations show `?` rather than silently keep displaying whatever was last
+  cached — but retrying doesn't stop there. It backs off and keeps trying
+  quietly in the background (10s, 30s, 1min, then every 5min) rather than
+  waiting for the next full `refreshMinutes` cycle or a manual/hover
+  refresh to notice connectivity is back — the case that matters most is
+  waking from suspend, where a fetch can fire before Wi-Fi has reconnected
+  (`Model.js`: `retryDelayMs`; `Panel.qml`: `scheduleMetarRetry`).
 - **Report age** — even when the fetch itself succeeds, a station's own
   observation time (`obsTime`) is checked against `maxAgeMinutes`. A quiet
   station (equipment fault, no reports outside operating hours, ...) ages

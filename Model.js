@@ -173,6 +173,31 @@ function fetchPlan(airportList, showTaf) {
   return { metar: "request", taf: showTaf ? "request" : "abandon" }
 }
 
+// Retry backoff schedule after a fetch failure. The first few attempts
+// stay tight (matches the original fixed-3-second retry this replaces) to
+// recover fast from a genuine one-off blip; once those are exhausted the
+// gaps widen and settle at a steady 5-minute cadence rather than ever
+// truly giving up. That matters most right after waking from suspend: a
+// fetch can fire before Wi-Fi has reconnected, and without this a station
+// would sit on stale/no data until the next full refreshMinutes cycle (up
+// to 60 minutes) or a manual/hover refresh, instead of quietly recovering
+// on its own within a few minutes of connectivity actually coming back.
+// attempt is 1-based (the retry this delay precedes); the schedule holds
+// at its last value for every attempt beyond it.
+var RETRY_BACKOFF_MS = [3000, 3000, 3000, 10000, 30000, 60000, 300000]
+// How many of the leading (tight) attempts above still count as "this
+// might just be a blip" — Panel.qml surfaces the offline state once these
+// are exhausted, then keeps retrying quietly in the background rather
+// than blocking a hover-refresh comparison on backoff attempts that could
+// take minutes to resolve.
+var RETRY_FAST_ATTEMPTS = 3
+function retryDelayMs(attempt) {
+  var idx = attempt - 1
+  if (idx < 0) idx = 0
+  if (idx >= RETRY_BACKOFF_MS.length) idx = RETRY_BACKOFF_MS.length - 1
+  return RETRY_BACKOFF_MS[idx]
+}
+
 function letterForCategory(category) {
   switch (String(category || "").toUpperCase()) {
     case "VFR": return "V"
@@ -924,6 +949,8 @@ if (typeof module !== "undefined") {
     buildBoundedFetchScript: buildBoundedFetchScript,
     buildFetchCommand: buildFetchCommand,
     fetchPlan: fetchPlan,
+    RETRY_FAST_ATTEMPTS: RETRY_FAST_ATTEMPTS,
+    retryDelayMs: retryDelayMs,
     sanitizeApiList: sanitizeApiList,
     sanitizeMetarItem: sanitizeMetarItem,
     sanitizeTafItem: sanitizeTafItem,

@@ -147,14 +147,21 @@ Panel {
     root.refresh()
   }
 
-  // Called after each fetch attempt settles (success or a scheduled-retry
-  // gap); only actually resolves once neither fetch is running nor has a
-  // retry pending, so a hover refresh's comparison waits for the full
-  // picture rather than firing mid-retry.
+  // Called after each fetch attempt settles (success, or a scheduled-retry
+  // gap); resolves once neither fetch is running nor has a *fast* retry
+  // pending, so a hover refresh's comparison waits for the full picture
+  // rather than firing mid-retry. A retry that's already backed off past
+  // Model.RETRY_FAST_ATTEMPTS doesn't count as "still settling" here — it
+  // keeps running indefinitely in the background (see scheduleMetarRetry),
+  // so waiting for it to stop would mean this never resolves at all.
   function maybeFinishHoverRefresh() {
     if (!root.hoverRefreshInFlight) return
-    if (metarProc.running || metarRetryTimer.running) return
-    if (root.showTaf && (tafProc.running || tafRetryTimer.running)) return
+    if (metarProc.running) return
+    if (metarRetryTimer.running && root.metarRetries <= Model.RETRY_FAST_ATTEMPTS) return
+    if (root.showTaf) {
+      if (tafProc.running) return
+      if (tafRetryTimer.running && root.tafRetries <= Model.RETRY_FAST_ATTEMPTS) return
+    }
     root.hoverRefreshInFlight = false
     var newFingerprint = Model.dataFingerprint(root.airportList, root.metarByIcao, root.tafByIcao)
     if (newFingerprint !== root.preHoverFingerprint) {
@@ -385,26 +392,34 @@ Panel {
   // shell retain — see Model.buildBoundedFetchScript.
   readonly property int maxResponseBytes: Model.MAX_RESPONSE_BYTES
 
+  // Never truly gives up: the first Model.RETRY_FAST_ATTEMPTS attempts
+  // stay tight (catches a one-off blip fast), then backs off and settles
+  // into a steady background cadence (see Model.retryDelayMs) rather than
+  // waiting for the next full refreshMinutes cycle. This is what recovers
+  // on its own after e.g. waking from suspend, where a fetch can fire
+  // before Wi-Fi has reconnected — without it, the bar would sit on
+  // stale/no data until the next scheduled refresh or a manual/hover
+  // refresh noticed connectivity was back.
   function scheduleMetarRetry() {
-    if (metarRetries >= 3) {
+    metarRetries++
+    if (metarRetries === Model.RETRY_FAST_ATTEMPTS + 1) {
+      // Fast attempts just exhausted — surface offline honestly now,
+      // rather than only once backoff eventually stops too (it doesn't).
       root.metarOffline = true
       root.manualRefreshInFlight = false
-      Qt.callLater(root.maybeFinishHoverRefresh)
-      return
     }
-    metarRetries++
     root.metarRetryGeneration = root.metarGeneration
+    metarRetryTimer.interval = Model.retryDelayMs(metarRetries)
     metarRetryTimer.restart()
+    Qt.callLater(root.maybeFinishHoverRefresh)
   }
 
   function scheduleTafRetry() {
-    if (tafRetries >= 3) {
-      Qt.callLater(root.maybeFinishHoverRefresh)
-      return
-    }
     tafRetries++
     root.tafRetryGeneration = root.tafGeneration
+    tafRetryTimer.interval = Model.retryDelayMs(tafRetries)
     tafRetryTimer.restart()
+    Qt.callLater(root.maybeFinishHoverRefresh)
   }
 
   function formatTemp(c) { return Model.formatTemp(c, root.imperial) }
@@ -575,7 +590,7 @@ Panel {
 
   Timer {
     id: metarRetryTimer
-    interval: 3000
+    interval: 3000 // overwritten per attempt by scheduleMetarRetry (see Model.retryDelayMs) — this initial value is never actually relied on
     // Bound to the generation the retry was scheduled for — if that's
     // since been superseded (settings changed, another refresh requested)
     // while this timer was waiting, it's a no-op: the newer request either
@@ -627,7 +642,7 @@ Panel {
 
   Timer {
     id: tafRetryTimer
-    interval: 3000
+    interval: 3000 // overwritten per attempt by scheduleTafRetry (see Model.retryDelayMs)
     onTriggered: {
       if (tafProc.running) return
       if (root.tafRetryGeneration !== root.tafGeneration) return

@@ -36,6 +36,31 @@ describe("fetchPlan", () => {
   })
 })
 
+describe("retryDelayMs", () => {
+  it("stays at the tight 3s spacing for the fast attempts", () => {
+    assert.equal(M.retryDelayMs(1), 3000)
+    assert.equal(M.retryDelayMs(2), 3000)
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS), 3000)
+  })
+
+  it("widens once the fast attempts are exhausted, up to a 5-minute cadence", () => {
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS + 1), 10000)
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS + 2), 30000)
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS + 3), 60000)
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS + 4), 300000)
+  })
+
+  it("holds at the 5-minute cadence indefinitely rather than growing further or giving up", () => {
+    assert.equal(M.retryDelayMs(M.RETRY_FAST_ATTEMPTS + 5), 300000)
+    assert.equal(M.retryDelayMs(1000), 300000)
+  })
+
+  it("clamps a non-positive attempt to the first delay defensively", () => {
+    assert.equal(M.retryDelayMs(0), 3000)
+    assert.equal(M.retryDelayMs(-5), 3000)
+  })
+})
+
 // Direct regression test for "Panel.qml overrides only PATH while
 // inheriting the rest of the environment" — proves both halves for real
 // against the exact command Panel.qml builds, using the exact mechanic
