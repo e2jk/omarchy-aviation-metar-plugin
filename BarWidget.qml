@@ -109,10 +109,18 @@ BarWidget {
     fontSize: Style.font.bodySmall
     horizontalMargin: 6
     tooltipText: root.barTooltip
-    // Reuses the button's existing active/activeColor color-flash — the
-    // same mechanism every other indicator's "something changed" state
-    // already uses — rather than inventing a bespoke animation.
+    // Reuses the button's existing active/activeColor flash animation
+    // rather than inventing a bespoke one, but not its default color:
+    // activeColor defaults to bar.urgent/Color.urgent (Omarchy's
+    // error/alert red, used elsewhere for things like low battery or a
+    // lock-screen error) — wrong semantics here, since this only ever
+    // means "the hover-triggered background refresh found different text
+    // than before," never anything about the weather itself or severity.
+    // Color.accent is the same neutral highlight this plugin's own popup
+    // already uses (station badges, tooltip borders), so the flash still
+    // reads as "something changed," not "something's wrong."
     active: root.justUpdated
+    activeColor: Color.accent
 
     onPressed: function(b) {
       if (!root.bar) return
