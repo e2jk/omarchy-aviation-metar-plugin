@@ -211,6 +211,19 @@ Panel {
   property int tafRetryGeneration: -1
   property string pendingTafUrl: ""
 
+  // Set true as the first thing `exited` does, and cleared back to false by
+  // the `runningChanged(false)` that always follows a normal exit — so if
+  // `runningChanged(false)` ever fires while this is still false, `exited`
+  // never fired at all. Verified live: that's exactly what happens when the
+  // command itself can't be exec'd (missing/non-executable path, permission
+  // denied, ...) — Quickshell's Process only emits runningChanged(false),
+  // never `exited`, so without this a broken/missing system binary would
+  // silently strand the fetch (running already false, nothing else left to
+  // ever trigger a retry) instead of failing exactly as gracefully as a
+  // normal network failure does.
+  property bool metarProcSettled: false
+  property bool tafProcSettled: false
+
   function buildMetarUrl() {
     return "https://aviationweather.gov/api/data/metar?ids="
       + encodeURIComponent(airportList.join(",")) + "&format=json"
@@ -277,6 +290,26 @@ Panel {
 
   function cancelTafProc() {
     if (tafProc.running) tafProc.signal(15)
+  }
+
+  // Shared by onExited and the launch-failure fallback in onRunningChanged
+  // below — either way a settled/failed metarProc needs the exact same
+  // "does anyone still want this result" check. Returns true (and already
+  // started whatever's actually wanted) if this launch was superseded.
+  function metarResultIsStale() {
+    if (root.metarProcGeneration === root.metarGeneration) return false
+    var nextUrl = root.pendingMetarUrl
+    root.pendingMetarUrl = ""
+    if (nextUrl !== "") root.startOrQueueMetarFetch(nextUrl, root.metarGeneration)
+    return true
+  }
+
+  function tafResultIsStale() {
+    if (root.tafProcGeneration === root.tafGeneration) return false
+    var nextUrl = root.pendingTafUrl
+    root.pendingTafUrl = ""
+    if (nextUrl !== "") root.startOrQueueTafFetch(nextUrl, root.tafGeneration)
+    return true
   }
 
   Component.onDestruction: {
@@ -374,17 +407,14 @@ Panel {
     environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: metarStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
+      root.metarProcSettled = true
+
       // This specific launch's generation is frozen in metarProcGeneration
       // when it started; if a newer request has since been made, this
       // result belongs to nobody anymore — never commit it, never let it
       // drive retry/offline state for the generation that's actually
       // current. Whatever was actually requested last runs now instead.
-      if (root.metarProcGeneration !== root.metarGeneration) {
-        var nextUrl = root.pendingMetarUrl
-        root.pendingMetarUrl = ""
-        if (nextUrl !== "") root.startOrQueueMetarFetch(nextUrl, root.metarGeneration)
-        return
-      }
+      if (root.metarResultIsStale()) return
 
       // curl -f fails (nonzero) on a transport error or an HTTP error
       // status — that's the only case worth retrying/going offline over.
@@ -436,6 +466,21 @@ Panel {
       root.lastUpdated = Date.now() / 1000
       Qt.callLater(root.maybeFinishHoverRefresh)
     }
+    onRunningChanged: {
+      if (metarProc.running) return
+      if (root.metarProcSettled) { root.metarProcSettled = false; return }
+      // `exited` never fired for this launch — verified live that this is
+      // exactly what happens when the command itself can't be exec'd
+      // (missing/non-executable path, permission denied, ...), not
+      // something that can be told apart from a normal exit any other way.
+      // Route through the same staleness/retry handling `exited` would
+      // have used, so this fails exactly as gracefully as a network
+      // failure (retried, then reported offline) instead of leaving
+      // manualRefreshInFlight/hoverRefreshInFlight stuck true forever with
+      // nothing left to ever resolve them.
+      if (root.metarResultIsStale()) return
+      root.scheduleMetarRetry()
+    }
   }
 
   Timer {
@@ -458,12 +503,8 @@ Panel {
     environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: tafStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
-      if (root.tafProcGeneration !== root.tafGeneration) {
-        var nextUrl = root.pendingTafUrl
-        root.pendingTafUrl = ""
-        if (nextUrl !== "") root.startOrQueueTafFetch(nextUrl, root.tafGeneration)
-        return
-      }
+      root.tafProcSettled = true
+      if (root.tafResultIsStale()) return
 
       if (exitCode !== 0) { root.scheduleTafRetry(); return }
 
@@ -483,6 +524,12 @@ Panel {
       root.tafByIcao = Model.buildByIcao(Model.sanitizeApiList(parsed).map(Model.sanitizeTafItem))
       root.tafRetries = 0
       Qt.callLater(root.maybeFinishHoverRefresh)
+    }
+    onRunningChanged: {
+      if (tafProc.running) return
+      if (root.tafProcSettled) { root.tafProcSettled = false; return }
+      if (root.tafResultIsStale()) return
+      root.scheduleTafRetry()
     }
   }
 
