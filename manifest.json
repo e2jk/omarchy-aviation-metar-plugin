@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "metar-taf",
   "name": "Aviation Weather (METAR/TAF)",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "e2jk",
   "description": "Aviation flight-category indicator (VFR/MVFR/IFR/LIFR) for your favorite airports, with a METAR/TAF detail popup",
   "kinds": ["bar-widget"],
