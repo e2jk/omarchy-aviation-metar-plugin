@@ -379,7 +379,7 @@ Panel {
     var info = Model.lastUpdatedTier(root.lastUpdated, root.nowTick)
     if (info.tier === "none") return ""
     var clock = Qt.formatDateTime(new Date(root.lastUpdated * 1000), "HH:mm")
-    if (info.tier === "justNow") return "Updated just now"
+    if (info.tier === "justNow") return "Updated just now (" + clock + ")"
     if (info.tier === "minutesAgo") return "Updated " + info.minutes + " min ago (" + clock + ")"
     if (info.tier === "today") return "Updated Today " + clock
     return "Updated " + Qt.formatDateTime(new Date(root.lastUpdated * 1000), "dddd") + " " + clock
