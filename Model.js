@@ -3,12 +3,23 @@
 // Kept dependency-free (no QML imports) so it can be unit tested with plain
 // node/qmljs if desired.
 
+// The `airports` setting is free-text a user (or a corrupt/misauthored
+// shell.json) can make arbitrarily large; every function that splits it
+// works from this bounded prefix rather than the raw value, so a
+// multi-megabyte string can never turn a config-parsing pass into
+// disproportionate allocation/CPU work. Far larger than any real airport
+// list needs (12 codes worth of legitimate input is under 100 characters).
+var MAX_AIRPORTS_RAW_LEN = 4000
+function boundAirportsRaw(raw) {
+  return String(raw || "").slice(0, MAX_AIRPORTS_RAW_LEN)
+}
+
 // ICAO airport identifiers are always exactly 4 alphanumeric characters —
 // not "usually" 4, structurally always (https://en.wikipedia.org/wiki/ICAO_airport_code).
 // A shorter or longer string can never be one, so it's rejected here rather
 // than sent to the API to fail there.
 function parseAirportList(raw) {
-  var parts = String(raw || "").split(/[,\s]+/)
+  var parts = boundAirportsRaw(raw).split(/[,\s]+/)
   var seen = {}
   var out = []
   for (var i = 0; i < parts.length; i++) {
@@ -23,13 +34,13 @@ function parseAirportList(raw) {
   return out
 }
 
-// Entries from the `airports` setting that parseAirportList silently drops
-// — wrong length or non-alphanumeric — so the UI can tell the user their
-// config has a typo instead of the code just vanishing with no explanation.
-// (A valid-shaped code that isn't a real/reporting station is a different,
-// harder-to-detect-upfront case — see buildEntries's everSeenIcaos.)
-function invalidAirportEntries(raw) {
-  var parts = String(raw || "").split(/[,\s]+/)
+// Every *distinct* invalid token found in the (already bounded) `airports`
+// setting — not capped in count, since counting over an already-bounded
+// string is cheap. What's actually retained/rendered is capped separately
+// by invalidAirportEntries below; this is the shared source of truth both
+// it and invalidAirportCount read from, so they can never disagree.
+function collectInvalidAirportEntries(raw) {
+  var parts = boundAirportsRaw(raw).split(/[,\s]+/)
   var seen = {}
   var invalid = []
   for (var i = 0; i < parts.length; i++) {
@@ -42,6 +53,54 @@ function invalidAirportEntries(raw) {
     invalid.push(code)
   }
   return invalid
+}
+
+// Entries from the `airports` setting that parseAirportList silently drops
+// — wrong length or non-alphanumeric — so the UI can tell the user their
+// config has a typo instead of the code just vanishing with no explanation.
+// (A valid-shaped code that isn't a real/reporting station is a different,
+// harder-to-detect-upfront case — see buildEntries's everSeenIcaos.) Capped
+// in both count and per-item length — a corrupt setting with thousands of
+// garbage tokens shouldn't turn into thousands of QML text characters; see
+// invalidAirportCount for how the UI shows what got left out.
+var MAX_INVALID_ENTRIES = 20
+var MAX_INVALID_ENTRY_LEN = 40
+function invalidAirportEntries(raw) {
+  var all = collectInvalidAirportEntries(raw)
+  var out = []
+  for (var i = 0; i < all.length && i < MAX_INVALID_ENTRIES; i++) {
+    var code = all[i]
+    out.push(code.length > MAX_INVALID_ENTRY_LEN ? code.slice(0, MAX_INVALID_ENTRY_LEN) + "…" : code)
+  }
+  return out
+}
+
+// Total distinct invalid entries found (before invalidAirportEntries' own
+// display cap) — lets the UI show "...and N more" rather than silently
+// truncating with no indication anything was left out.
+function invalidAirportCount(raw) {
+  return collectInvalidAirportEntries(raw).length
+}
+
+// ---- Fetch response byte cap. aviationweather.gov normally returns a few
+// KB for a dozen airports, but nothing stops a faulty proxy or a
+// compromised/DNS-hijacked responder from streaming far more, and curl's
+// own `--max-filesize` has *no effect* on a chunked/no-Content-Length
+// response (curl's docs: it only works when the size is knowable in
+// advance) — exactly the shape a streaming response would take. `head -c`
+// enforces the cap on bytes actually received regardless of how (or
+// whether) the server declares a length, which --max-filesize alone cannot
+// guarantee. Piped through bash so `head`'s own stdout — never more than
+// maxBytes+1 bytes — is the only thing the calling Process ever collects;
+// `set -o pipefail` + PIPESTATUS report curl's own exit code (not head's)
+// as the pipeline's result, so a normal, under-cap response's success/
+// failure signal reaches the existing retry logic unchanged. The URL is
+// passed as "$1", a separate argv element (not interpolated into the
+// script string), so it never needs shell-quoting.
+var MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+function buildBoundedFetchScript(maxBytes) {
+  return "set -o pipefail; curl -fsS --max-time 8 --max-filesize " + maxBytes
+    + " \"$1\" | head -c " + (maxBytes + 1) + "; exit \"${PIPESTATUS[0]}\""
 }
 
 function letterForCategory(category) {
@@ -500,6 +559,115 @@ function decodeTafText(taf, imperial, formatTime) {
   return lines.join(" ")
 }
 
+// ---- Response bounding. aviationweather.gov is a public, unauthenticated
+// endpoint reached over plain network I/O (see fetchMetar/fetchTaf in
+// Panel.qml) — a faulty or compromised responder is not a trust boundary
+// this plugin can assume away. Everything below caps what gets retained in
+// the model and rendered/copied, independent of the byte-level response cap
+// enforced at the fetch itself (see buildBoundedFetchScript).
+var MAX_LIST_ITEMS = 50 // well above the 12-airport cap; bounds a hostile/broken response's item count, not real ones
+var MAX_STRING_LEN = 2000 // rawOb/rawTAF are normally well under 300 chars
+var MAX_NAME_LEN = 200
+var MAX_WX_STRING_LEN = 200
+var MAX_CLOUDS = 12
+var MAX_FCSTS = 24
+
+function sanitizeString(value, maxLen) {
+  if (typeof value !== "string") return ""
+  return value.length > maxLen ? value.slice(0, maxLen) : value
+}
+
+function sanitizeFiniteNumber(value) {
+  return (typeof value === "number" && isFinite(value)) ? value : null
+}
+
+// wdir and visib legitimately arrive as either a number or a short string
+// ("VRB", "6+", "1/2SM") — existing parsing (formatWind, parseVisib) already
+// handles both shapes. Bounded to a short length regardless: none of the
+// real values are ever more than a handful of characters.
+function sanitizeNumberOrShortString(value, maxLen) {
+  if (typeof value === "number" && isFinite(value)) return value
+  if (typeof value === "string") return sanitizeString(value, maxLen)
+  return null
+}
+
+function sanitizeCloudLayer(layer) {
+  if (!layer || typeof layer !== "object") return null
+  return { cover: sanitizeString(layer.cover, 8), base: sanitizeFiniteNumber(layer.base) }
+}
+
+function sanitizeClouds(clouds) {
+  if (!Array.isArray(clouds)) return []
+  var out = []
+  for (var i = 0; i < clouds.length && out.length < MAX_CLOUDS; i++) {
+    var layer = sanitizeCloudLayer(clouds[i])
+    if (layer) out.push(layer)
+  }
+  return out
+}
+
+// One TAF forecast/change-group period (the API's `fcsts[]` entries).
+function sanitizeFcst(fcst) {
+  if (!fcst || typeof fcst !== "object") return null
+  return {
+    fcstChange: sanitizeString(fcst.fcstChange, 16),
+    probability: sanitizeFiniteNumber(fcst.probability),
+    timeFrom: sanitizeFiniteNumber(fcst.timeFrom),
+    timeTo: sanitizeFiniteNumber(fcst.timeTo),
+    wdir: sanitizeNumberOrShortString(fcst.wdir, 8),
+    wspd: sanitizeFiniteNumber(fcst.wspd),
+    wgst: sanitizeFiniteNumber(fcst.wgst),
+    wxString: sanitizeString(fcst.wxString, MAX_WX_STRING_LEN),
+    clouds: sanitizeClouds(fcst.clouds)
+  }
+}
+
+// Whitelists and bounds exactly the fields this plugin reads off a raw
+// METAR API item — every other field the API might send (or a
+// faulty/compromised responder might substitute) is dropped rather than
+// carried through to formatters, tooltips, fingerprints, or the clipboard.
+function sanitizeMetarItem(item) {
+  if (!item || typeof item !== "object") return null
+  return {
+    icaoId: sanitizeString(item.icaoId, 8),
+    name: sanitizeString(item.name, MAX_NAME_LEN),
+    fltCat: sanitizeString(item.fltCat, 8),
+    rawOb: sanitizeString(item.rawOb, MAX_STRING_LEN),
+    obsTime: sanitizeFiniteNumber(item.obsTime),
+    temp: sanitizeFiniteNumber(item.temp),
+    dewp: sanitizeFiniteNumber(item.dewp),
+    wdir: sanitizeNumberOrShortString(item.wdir, 8),
+    wspd: sanitizeFiniteNumber(item.wspd),
+    wgst: sanitizeFiniteNumber(item.wgst),
+    visib: sanitizeNumberOrShortString(item.visib, 12),
+    altim: sanitizeFiniteNumber(item.altim),
+    wxString: sanitizeString(item.wxString, MAX_WX_STRING_LEN),
+    clouds: sanitizeClouds(item.clouds)
+  }
+}
+
+// Same whitelisting for a raw TAF API item, including a capped fcsts[].
+function sanitizeTafItem(item) {
+  if (!item || typeof item !== "object") return null
+  var fcsts = []
+  if (Array.isArray(item.fcsts)) {
+    for (var i = 0; i < item.fcsts.length && fcsts.length < MAX_FCSTS; i++) {
+      var f = sanitizeFcst(item.fcsts[i])
+      if (f) fcsts.push(f)
+    }
+  }
+  return { icaoId: sanitizeString(item.icaoId, 8), rawTAF: sanitizeString(item.rawTAF, MAX_STRING_LEN), fcsts: fcsts }
+}
+
+// Caps the top-level array itself before any per-item work happens — a
+// response type-confused into something huge (or just an oversized but
+// syntactically valid array) can't force processing of more than this many
+// items regardless of what's above it in the pipeline.
+function sanitizeApiList(list) {
+  if (!Array.isArray(list)) return []
+  return list.length > MAX_LIST_ITEMS ? list.slice(0, MAX_LIST_ITEMS) : list
+}
+
 // The API returns most-recent-first; keep the first sighting of each id.
 function buildByIcao(list) {
   var map = {}
@@ -674,6 +842,14 @@ if (typeof module !== "undefined") {
   module.exports = {
     parseAirportList: parseAirportList,
     invalidAirportEntries: invalidAirportEntries,
+    invalidAirportCount: invalidAirportCount,
+    MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
+    buildBoundedFetchScript: buildBoundedFetchScript,
+    sanitizeApiList: sanitizeApiList,
+    sanitizeMetarItem: sanitizeMetarItem,
+    sanitizeTafItem: sanitizeTafItem,
+    sanitizeClouds: sanitizeClouds,
+    sanitizeFcst: sanitizeFcst,
     letterForCategory: letterForCategory,
     parseVisib: parseVisib,
     significantTokens: significantTokens,

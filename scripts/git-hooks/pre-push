@@ -71,8 +71,15 @@ fi
 if command -v shellcheck >/dev/null 2>&1; then
   run_check "shellcheck" shellcheck scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh
 elif command -v docker >/dev/null 2>&1; then
+  # Pinned by digest, not the mutable :stable tag (currently what :stable
+  # resolves to), so a republished tag can't silently swap in a different
+  # image for something that runs automatically on every push. Re-resolve
+  # deliberately (docker pull koalaman/shellcheck:stable; docker inspect
+  # --format='{{index .RepoDigests 0}}' koalaman/shellcheck:stable) rather
+  # than just bumping this on a whim.
+  shellcheck_image="koalaman/shellcheck@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d"
   run_check "shellcheck (docker)" docker run --rm -v "$repo_root:/mnt:ro" -w /mnt \
-    koalaman/shellcheck:stable scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh
+    "$shellcheck_image" scripts/git-hooks/pre-push scripts/validate-manifest.sh scripts/run-qmllint.sh
 else
   echo "pre-push: shellcheck not found (and no docker to run it via container), skipping" >&2
 fi

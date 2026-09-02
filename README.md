@@ -119,6 +119,31 @@ Two separate cases, told apart rather than both showing a generic `?`:
   unrecognized id from an otherwise-successful multi-airport response —
   neither case is a network failure, so neither is treated as one).
 
+## Untrusted input handling
+
+`aviationweather.gov` is a public, unauthenticated HTTP endpoint, and the
+`airports` setting is free-text — neither is treated as a trust boundary
+that "normally behaves" is enough to rely on:
+
+- **Fetch responses are byte-capped end to end.** `curl`'s own
+  `--max-filesize` has no effect on a chunked/no-`Content-Length` response
+  (curl only enforces it when a size is declared upfront), so the fetch is
+  additionally piped through `head -c` — the calling process can never
+  collect more than a fixed byte ceiling regardless of how a response is
+  transferred, and anything that reaches the ceiling is rejected outright
+  rather than parsed.
+- **Every field read off a response is whitelisted, typed, and
+  length-capped** before it reaches a formatter, tooltip, fingerprint, or
+  the clipboard — the top-level array itself, each METAR/TAF's string
+  fields, and each nested clouds/forecast-period array are all bounded
+  (`Model.js`: `sanitizeApiList`/`sanitizeMetarItem`/`sanitizeTafItem`).
+  Unrecognized fields are dropped rather than carried through.
+- **The `airports` setting is bounded before any parsing happens** — a
+  corrupt or malicious value can't turn config parsing into unbounded
+  allocation, and the invalid-entries warning banner shows a capped list
+  plus a truncated count (`"...and N more"`) rather than rendering an
+  unbounded one.
+
 ## Install
 
 ```bash
@@ -214,7 +239,7 @@ prints its full output, so it stays fully diagnosable.
 | `scripts/run-qmllint.sh` | Syntax errors on `BarWidget.qml`/`Panel.qml` stay fatal; every semantic/type-checking category qmllint reports (extracted from its own `--help`, not a hardcoded list) is forced to non-fatal `info`, since Quickshell's `qs.*` namespace and base types (`BarWidget`, `Panel`, ...) aren't resolvable without its full build and can trip essentially any type-aware check — not a fixed, nameable set, and not even a stable one: Qt 6.4.2 (Ubuntu 24.04's package, what CI uses) calls the same checks `property`/`type`/`signal` where a typical dev machine's Qt 6.11+ calls them `missing-property`/`unresolved-type`/`signal-handler-parameters` | Skips with a note if not found (checks both `qmllint` on `PATH` and Qt6's usual `/usr/lib/qt6/bin/qmllint`) |
 | `scripts/validate-manifest.sh` | Portable manifest.json schema check (valid JSON, `schemaVersion`, required fields, entry points exist, id not in the reserved `omarchy.*` namespace) — no Omarchy install required, so it's what actually runs in CI | Always runs |
 | `omarchy plugin validate` | The real, stricter Omarchy validator (symlinks, exact entry-point safety, ...) | Only runs if the `omarchy` CLI is present (i.e. on an actual Omarchy machine) — CI can't run this one |
-| `shellcheck` | Lints this hook and the manifest validator script themselves | Not installed as a system package on purpose (its real dependency chain — a full GHC/Haskell runtime — is ~200MB installed for linting two small scripts); runs via `docker run koalaman/shellcheck` if `docker` is present, otherwise skipped with a note. Pre-installed on GitHub's `ubuntu-latest` runners, so CI always runs it natively |
+| `shellcheck` | Lints this hook and the manifest validator script themselves | Not installed as a system package on purpose (its real dependency chain — a full GHC/Haskell runtime — is ~200MB installed for linting two small scripts); runs via `docker run` against `koalaman/shellcheck`, pinned by digest (not the mutable `:stable` tag) if `docker` is present, otherwise skipped with a note. Pre-installed on GitHub's `ubuntu-latest` runners, so CI always runs it natively |
 
 The QML files (`BarWidget.qml`, `Panel.qml`) aren't covered by the `Model.js`
 unit-test suite — there's no QML test harness set up for this repo, `qmllint`

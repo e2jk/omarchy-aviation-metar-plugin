@@ -68,6 +68,7 @@ Panel {
   // shape (not exactly 4 alphanumeric characters) — surfaced in the popup
   // so a typo doesn't just make a station quietly vanish with no explanation.
   readonly property var invalidAirportEntries: Model.invalidAirportEntries(airportsRaw)
+  readonly property int invalidAirportCount: Model.invalidAirportCount(airportsRaw)
   readonly property bool imperial: setting("units", "Metric") === "Imperial"
   readonly property bool showTaf: setting("showTaf", true) === true
   readonly property int refreshMinutes: Math.max(5, Math.min(60, parseInt(setting("refreshMinutes", 10), 10) || 10))
@@ -195,17 +196,22 @@ Panel {
     refresh()
   }
 
+  // Well above any real response (a dozen airports' METAR/TAF is a few KB)
+  // but a hard cap on what a faulty/compromised responder can make this
+  // shell retain — see Model.buildBoundedFetchScript.
+  readonly property int maxResponseBytes: Model.MAX_RESPONSE_BYTES
+
   function fetchMetar() {
     var url = "https://aviationweather.gov/api/data/metar?ids="
       + encodeURIComponent(airportList.join(",")) + "&format=json"
-    metarProc.command = ["curl", "-fsS", "--max-time", "8", url]
+    metarProc.command = ["bash", "-c", Model.buildBoundedFetchScript(root.maxResponseBytes), "fetch-metar", url]
     metarProc.running = true
   }
 
   function fetchTaf() {
     var url = "https://aviationweather.gov/api/data/taf?ids="
       + encodeURIComponent(airportList.join(",")) + "&format=json"
-    tafProc.command = ["curl", "-fsS", "--max-time", "8", url]
+    tafProc.command = ["bash", "-c", Model.buildBoundedFetchScript(root.maxResponseBytes), "fetch-taf", url]
     tafProc.running = true
   }
 
@@ -282,7 +288,13 @@ Panel {
       // invalid" as "we're offline" after retries exhaust.
       if (exitCode !== 0) { root.scheduleMetarRetry(); return }
 
-      var raw = String(metarStdout.text || "").trim()
+      // Belt-and-braces alongside the fetch-side head -c cap (see
+      // buildBoundedFetchScript): explicitly reject rather than parse
+      // anything that reached the byte ceiling, instead of relying on
+      // JSON.parse to happen to throw on a truncated body.
+      var rawFull = String(metarStdout.text || "")
+      if (rawFull.length > root.maxResponseBytes) { root.scheduleMetarRetry(); return }
+      var raw = rawFull.trim()
       var parsed = []
       if (raw) {
         try {
@@ -293,12 +305,19 @@ Panel {
         }
       }
 
-      root.metarByIcao = Model.buildByIcao(parsed)
+      root.metarByIcao = Model.buildByIcao(Model.sanitizeApiList(parsed).map(Model.sanitizeMetarItem))
       // Reassign (not mutate-in-place) so the `entries` binding, which
-      // reads this property, actually re-evaluates.
+      // reads this property, actually re-evaluates. Only ever tracks
+      // configured airports — the only ones buildEntries ever looks up —
+      // so this can't grow past airportList's own 12-entry cap even if a
+      // compromised responder returns other stations' ids.
       var seen = {}
-      for (var prevIcao in root.everSeenIcaos) seen[prevIcao] = true
-      for (var icao in root.metarByIcao) seen[icao] = true
+      for (var prevIcao in root.everSeenIcaos) {
+        if (root.airportList.indexOf(prevIcao) !== -1) seen[prevIcao] = true
+      }
+      for (var icao in root.metarByIcao) {
+        if (root.airportList.indexOf(icao) !== -1) seen[icao] = true
+      }
       root.everSeenIcaos = seen
       root.metarRetries = 0
       root.metarEverSucceeded = true
@@ -321,7 +340,9 @@ Panel {
     onExited: function(exitCode, exitStatus) {
       if (exitCode !== 0) { root.scheduleTafRetry(); return }
 
-      var raw = String(tafStdout.text || "").trim()
+      var rawFull = String(tafStdout.text || "")
+      if (rawFull.length > root.maxResponseBytes) { root.scheduleTafRetry(); return }
+      var raw = rawFull.trim()
       var parsed = []
       if (raw) {
         try {
@@ -332,7 +353,7 @@ Panel {
         }
       }
 
-      root.tafByIcao = Model.buildByIcao(parsed)
+      root.tafByIcao = Model.buildByIcao(Model.sanitizeApiList(parsed).map(Model.sanitizeTafItem))
       root.tafRetries = 0
       Qt.callLater(root.maybeFinishHoverRefresh)
     }
@@ -484,9 +505,13 @@ Panel {
           // parseAirportList. Surface it instead of letting a typo just
           // make a station vanish with no explanation.
           Text {
-            visible: root.invalidAirportEntries.length > 0
-            text: "⚠ Ignored invalid airport code" + (root.invalidAirportEntries.length > 1 ? "s" : "")
-              + ": " + root.invalidAirportEntries.join(", ") + " (ICAO codes are exactly 4 characters)"
+            visible: root.invalidAirportCount > 0
+            text: "⚠ Ignored invalid airport code" + (root.invalidAirportCount > 1 ? "s" : "")
+              + ": " + root.invalidAirportEntries.join(", ")
+              + (root.invalidAirportCount > root.invalidAirportEntries.length
+                  ? " (+" + (root.invalidAirportCount - root.invalidAirportEntries.length) + " more)"
+                  : "")
+              + " (ICAO codes are exactly 4 characters)"
             color: Qt.darker(root.bar.foreground, 1.3)
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.bodySmall
