@@ -126,15 +126,16 @@ Panel {
   // ---- Hover-triggered background refresh. Hovering the bar when the data
   // is older than hoverRefreshMinutes quietly refreshes in the background —
   // deliberately NOT fed into buildEntries' `loading` (no dash, no visible
-  // disruption while it's in flight). Once it settles, the fetched data is
-  // fingerprinted (raw METAR+TAF text, not the full API payload — see
-  // Model.dataFingerprint) and compared against what was showing before the
-  // hover-refresh started; only a genuine change triggers `justUpdated`,
-  // which the bar uses to briefly flash — a hover refresh that came back
-  // identical stays completely silent, as specified in issue #5.
+  // disruption while it's in flight). Once it settles, each station's data
+  // is fingerprinted individually (raw METAR+TAF text, not the full API
+  // payload — see Model.dataFingerprintsByIcao) and compared per-ICAO
+  // against what was showing before the hover-refresh started, so only the
+  // station(s) that actually changed flash — not the whole bar for one
+  // station's update, and not at all if the whole refresh came back
+  // identical (as specified in issue #5).
   property bool hoverRefreshInFlight: false
-  property string preHoverFingerprint: ""
-  property bool justUpdated: false
+  property var preHoverFingerprints: ({})
+  property var justUpdatedIcaos: ({})
 
   function refreshIfStale() {
     if (root.manualRefreshInFlight || root.hoverRefreshInFlight) return
@@ -143,7 +144,7 @@ Panel {
     var now = Date.now() / 1000
     if (root.lastUpdated > 0 && (now - root.lastUpdated) < root.hoverRefreshMinutes * 60) return
     root.hoverRefreshInFlight = true
-    root.preHoverFingerprint = Model.dataFingerprint(root.airportList, root.metarByIcao, root.tafByIcao)
+    root.preHoverFingerprints = Model.dataFingerprintsByIcao(root.airportList, root.metarByIcao, root.tafByIcao)
     root.refresh()
   }
 
@@ -163,9 +164,12 @@ Panel {
       if (tafRetryTimer.running && root.tafRetries <= Model.RETRY_FAST_ATTEMPTS) return
     }
     root.hoverRefreshInFlight = false
-    var newFingerprint = Model.dataFingerprint(root.airportList, root.metarByIcao, root.tafByIcao)
-    if (newFingerprint !== root.preHoverFingerprint) {
-      root.justUpdated = true
+    var newFingerprints = Model.dataFingerprintsByIcao(root.airportList, root.metarByIcao, root.tafByIcao)
+    var changed = Model.changedIcaos(root.airportList, root.preHoverFingerprints, newFingerprints)
+    if (changed.length > 0) {
+      var changedMap = {}
+      for (var i = 0; i < changed.length; i++) changedMap[changed[i]] = true
+      root.justUpdatedIcaos = changedMap
       justUpdatedResetTimer.restart()
     }
   }
@@ -173,7 +177,7 @@ Panel {
   Timer {
     id: justUpdatedResetTimer
     interval: 2000
-    onTriggered: root.justUpdated = false
+    onTriggered: root.justUpdatedIcaos = ({})
   }
 
   readonly property var entries: Model.buildEntries(airportList, metarByIcao, {

@@ -138,30 +138,61 @@ describe("fnv1aHash", () => {
   })
 })
 
-describe("dataFingerprint", () => {
+describe("dataFingerprintsByIcao", () => {
   var metarByIcao = { EBAW: { rawOb: "METAR EBAW ..." } }
   var tafByIcao = { EBAW: { rawTAF: "TAF EBAW ..." } }
 
   it("is stable for the same data", () => {
-    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
-    var b = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
-    assert.equal(a, b)
+    var a = M.dataFingerprintsByIcao(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprintsByIcao(["EBAW"], metarByIcao, tafByIcao)
+    assert.equal(a.EBAW, b.EBAW)
   })
 
   it("changes when a METAR changes", () => {
-    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
-    var b = M.dataFingerprint(["EBAW"], { EBAW: { rawOb: "METAR EBAW updated" } }, tafByIcao)
-    assert.notEqual(a, b)
+    var a = M.dataFingerprintsByIcao(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprintsByIcao(["EBAW"], { EBAW: { rawOb: "METAR EBAW updated" } }, tafByIcao)
+    assert.notEqual(a.EBAW, b.EBAW)
   })
 
   it("changes when a TAF changes", () => {
-    var a = M.dataFingerprint(["EBAW"], metarByIcao, tafByIcao)
-    var b = M.dataFingerprint(["EBAW"], metarByIcao, { EBAW: { rawTAF: "TAF EBAW updated" } })
-    assert.notEqual(a, b)
+    var a = M.dataFingerprintsByIcao(["EBAW"], metarByIcao, tafByIcao)
+    var b = M.dataFingerprintsByIcao(["EBAW"], metarByIcao, { EBAW: { rawTAF: "TAF EBAW updated" } })
+    assert.notEqual(a.EBAW, b.EBAW)
   })
 
   it("tolerates a missing metar/taf entry for a configured airport", () => {
-    var fp = M.dataFingerprint(["EBXX"], {}, {})
-    assert.equal(typeof fp, "string")
+    var fp = M.dataFingerprintsByIcao(["EBXX"], {}, {})
+    assert.equal(typeof fp.EBXX, "string")
+  })
+
+  it("keys the result by ICAO, one entry per configured airport", () => {
+    var fp = M.dataFingerprintsByIcao(["EBAW", "EBBR"], metarByIcao, tafByIcao)
+    assert.deepEqual(Object.keys(fp).sort(), ["EBAW", "EBBR"])
+  })
+})
+
+describe("changedIcaos", () => {
+  it("returns [] when nothing changed", () => {
+    var before = { EBAW: "a", EBBR: "b" }
+    var after = { EBAW: "a", EBBR: "b" }
+    assert.deepEqual(M.changedIcaos(["EBAW", "EBBR"], before, after), [])
+  })
+
+  it("reports only the airport(s) whose fingerprint actually differs", () => {
+    var before = { EBAW: "a", EBBR: "b", EBCI: "c" }
+    var after = { EBAW: "a", EBBR: "b-changed", EBCI: "c" }
+    assert.deepEqual(M.changedIcaos(["EBAW", "EBBR", "EBCI"], before, after), ["EBBR"])
+  })
+
+  it("reports every airport that changed when more than one does", () => {
+    var before = { EBAW: "a", EBBR: "b" }
+    var after = { EBAW: "a-changed", EBBR: "b-changed" }
+    assert.deepEqual(M.changedIcaos(["EBAW", "EBBR"], before, after), ["EBAW", "EBBR"])
+  })
+
+  it("treats an airport missing from 'before' as changed", () => {
+    var before = { EBAW: "a" }
+    var after = { EBAW: "a", EBBR: "b" }
+    assert.deepEqual(M.changedIcaos(["EBAW", "EBBR"], before, after), ["EBBR"])
   })
 })

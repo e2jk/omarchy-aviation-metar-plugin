@@ -289,12 +289,12 @@ cross-country you're planning.
 
 Hovering the bar also refreshes in the background if the data is older than
 `hoverRefreshMinutes` (default 2 min) — silently. It only becomes visible
-(a brief flash on the bar letters, in the theme's neutral accent color —
-never red/urgent, which would misread as a severity warning about the
-weather itself) if the refreshed METAR/TAF text actually differs from what
-was already showing; a hover refresh that comes back identical is a
-complete no-op, so hovering to check freshness never
-adds visual noise for its own sake.
+(a brief bold weight, not a color change — consistent with the letters
+never being color-coded at all, see "Why letters, not colors" above) on
+whichever specific airport's letter actually changed, not the whole
+indicator for one station's update; a hover refresh that comes back
+identical for every station is a complete no-op, so hovering to check
+freshness never adds visual noise for its own sake.
 
 ## Development
 

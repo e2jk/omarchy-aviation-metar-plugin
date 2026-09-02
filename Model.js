@@ -917,20 +917,35 @@ function fnv1aHash(str) {
   return hash.toString(16)
 }
 
-// A fingerprint of exactly the coded text a person would read — the raw
-// METAR and TAF strings for every configured airport, in list order — not
-// the full API payload (which carries fields like receiptTime/dbPopTime
-// that change on every single request regardless of whether the weather
-// itself did).
-function dataFingerprint(airportList, metarByIcao, tafByIcao) {
-  var parts = []
+// A fingerprint of exactly the coded text a person would read for one
+// station — its raw METAR and TAF strings — not the full API payload
+// (which carries fields like receiptTime/dbPopTime that change on every
+// single request regardless of whether the weather itself did). Keyed by
+// ICAO rather than combined into one hash so a hover-triggered refresh can
+// tell *which* station(s) actually changed, not just "something did" —
+// see changedIcaos below.
+function dataFingerprintsByIcao(airportList, metarByIcao, tafByIcao) {
+  var out = {}
   for (var i = 0; i < airportList.length; i++) {
     var icao = airportList[i]
     var metar = metarByIcao[icao]
     var taf = tafByIcao[icao]
-    parts.push(icao + ":" + (metar && metar.rawOb ? metar.rawOb : "") + "|" + (taf && taf.rawTAF ? taf.rawTAF : ""))
+    out[icao] = fnv1aHash(icao + ":" + (metar && metar.rawOb ? metar.rawOb : "") + "|" + (taf && taf.rawTAF ? taf.rawTAF : ""))
   }
-  return fnv1aHash(parts.join(";"))
+  return out
+}
+
+// Which airports' fingerprint actually differs between two snapshots
+// (typically "right before" and "right after" a hover-triggered
+// background refresh) — an airport missing from `before` (a config change
+// mid-refresh) counts as changed too, since undefined !== any real hash.
+function changedIcaos(airportList, before, after) {
+  var changed = []
+  for (var i = 0; i < airportList.length; i++) {
+    var icao = airportList[i]
+    if (before[icao] !== after[icao]) changed.push(icao)
+  }
+  return changed
 }
 
 if (typeof module !== "undefined") {
@@ -988,6 +1003,7 @@ if (typeof module !== "undefined") {
     buildEntries: buildEntries,
     summaryLine: summaryLine,
     fnv1aHash: fnv1aHash,
-    dataFingerprint: dataFingerprint
+    dataFingerprintsByIcao: dataFingerprintsByIcao,
+    changedIcaos: changedIcaos
   }
 }

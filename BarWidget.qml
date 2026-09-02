@@ -38,7 +38,11 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.sendNotification) panelLoader.item.sendNotification(text)
   }
 
-  readonly property bool justUpdated: panelLoader.item ? panelLoader.item.justUpdated === true : false
+  // {ICAO: true} for whichever station(s) a hover-triggered background
+  // refresh just found different text for — not a single whole-bar flag,
+  // so only that station's own letter flashes (see the per-letter Row/
+  // Column below), not the other configured airports that didn't change.
+  readonly property var justUpdatedIcaos: panelLoader.item ? panelLoader.item.justUpdatedIcaos : ({})
 
   function togglePanel() {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
@@ -101,26 +105,58 @@ BarWidget {
     }
   }
 
+  // One Text per airport instead of WidgetButton's own single-string
+  // label, so only the station(s) that actually changed can flash — not
+  // the whole "V M V" together for one station's update. WidgetButton
+  // still owns click/hover/tooltip/sizing (its own label stays sized off
+  // the same barText, just invisible); this only replaces what's drawn.
+  Component {
+    id: letterDelegate
+    Text {
+      id: letterText
+      required property var modelData
+      textFormat: Text.PlainText
+      text: modelData.letter
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      // Bold, not a color change — color-coding severity is exactly what
+      // this plugin's letters (V/M/I/L, not colored red/yellow/green)
+      // deliberately avoid, and even a neutral accent color still reads
+      // as "using color" against that. Bold is typographic weight, not
+      // color, and this codebase already uses it the same way elsewhere
+      // (Panel.qml's VIS/Clouds stats) — a station's letter goes bold
+      // exactly when a hover-triggered background refresh found different
+      // text for it than before, nothing about the weather's severity.
+      font.bold: root.justUpdatedIcaos[modelData.icao] === true
+      renderType: Text.NativeRendering
+      horizontalAlignment: Text.AlignHCenter
+      color: root.bar ? root.bar.barForeground : Color.foreground
+    }
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: root.barText
+    labelVisible: false
     fontSize: Style.font.bodySmall
     horizontalMargin: 6
     tooltipText: root.barTooltip
-    // Reuses the button's existing active/activeColor flash animation
-    // rather than inventing a bespoke one, but not its default color:
-    // activeColor defaults to bar.urgent/Color.urgent (Omarchy's
-    // error/alert red, used elsewhere for things like low battery or a
-    // lock-screen error) — wrong semantics here, since this only ever
-    // means "the hover-triggered background refresh found different text
-    // than before," never anything about the weather itself or severity.
-    // Color.accent is the same neutral highlight this plugin's own popup
-    // already uses (station badges, tooltip borders), so the flash still
-    // reads as "something changed," not "something's wrong."
-    active: root.justUpdated
-    activeColor: Color.accent
+
+    Row {
+      visible: !(root.bar && root.bar.vertical)
+      anchors.centerIn: parent
+      spacing: Style.space(6)
+      Repeater { model: root.entries; delegate: letterDelegate }
+    }
+
+    Column {
+      visible: root.bar && root.bar.vertical
+      anchors.centerIn: parent
+      spacing: Style.space(2)
+      Repeater { model: root.entries; delegate: letterDelegate }
+    }
 
     onPressed: function(b) {
       if (!root.bar) return
