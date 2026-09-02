@@ -436,14 +436,50 @@ Panel {
 
   // Native clipboard write via Qt/Quickshell's own clipboard integration —
   // no subprocess, no shell, nothing to resolve via $PATH at all. Confirms
-  // via a desktop notification sent directly by fixed path/argv
-  // (execDetached — no shell involved), not the base shell's own
-  // root.bar.run helper, which resolves "bash" via inherited PATH
-  // internally and isn't something this plugin's own fixes can reach.
+  // via a desktop notification (see sendNotification below).
   function copyToClipboard(value, label) {
     if (!value) return
     Quickshell.clipboardText = value
-    Quickshell.execDetached([Model.TRUSTED_NOTIFICATION_SEND_PATH, label + " copied"])
+    root.sendNotification(label + " copied")
+  }
+
+  // omarchy-notification-send is itself a #!/bin/bash script — a fixed,
+  // trusted *path* alone doesn't stop the kernel from starting Bash for it
+  // and that Bash (and the busctl it calls internally) inheriting whatever
+  // environment launched it, the same interpreter/loader injection surface
+  // (LD_PRELOAD, LD_LIBRARY_PATH, BASH_ENV, ...) already closed for the
+  // fetch Processes. Quickshell.execDetached has no environment control
+  // (its ProcessContext overload exists in principle, but isn't
+  // constructible as a plain JS object at the QML/JS boundary — verified
+  // live, and the base Omarchy shell itself never uses it either), so this
+  // uses the same supervised, environment-cleared Process pattern as the
+  // fetches instead. A fresh Process per call (not a single reused one,
+  // unlike metarProc/tafProc) — a dropped/overwritten notification from two
+  // firing in close succession would be a silent, low-stakes UX
+  // regression, but there's no reason to accept even that when nothing
+  // here needs the result, so each call gets an independent, disposable
+  // instance that destroys itself once it exits.
+  //
+  // busctl --user (what the script calls internally to reach the
+  // notification daemon over D-Bus) needs XDG_RUNTIME_DIR to find the
+  // user's session bus — verified live: PATH alone fails ("$DBUS_SESSION_
+  // BUS_ADDRESS and $XDG_RUNTIME_DIR not defined"), PATH + XDG_RUNTIME_DIR
+  // succeeds. Read once via Quickshell.env, not inherited wholesale.
+  readonly property string notificationXdgRuntimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
+
+  Component {
+    id: notifyProcComponent
+    Process {
+      clearEnvironment: true
+      environment: ({ "PATH": Model.TRUSTED_PATH_ENV, "XDG_RUNTIME_DIR": root.notificationXdgRuntimeDir })
+      onExited: destroy()
+    }
+  }
+
+  function sendNotification(text) {
+    if (!text) return
+    var proc = notifyProcComponent.createObject(root, { command: [Model.TRUSTED_NOTIFICATION_SEND_PATH, text] })
+    if (proc) proc.running = true
   }
 
   Process {

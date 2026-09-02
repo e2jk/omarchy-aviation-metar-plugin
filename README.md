@@ -149,10 +149,26 @@ that "normally behaves" is enough to rely on:
   `/usr/bin/timeout`, `/usr/bin/omarchy-notification-send` — all
   base-system tools (bash, coreutils) or a genuine Omarchy-provided script,
   never a third-party package. A user-writable earlier `$PATH` entry can't
-  substitute a different binary for any of them. Desktop notifications are
-  sent directly by fixed path/argv (`Quickshell.execDetached`, no shell
-  involved) rather than through the base shell's own `bar.run` helper,
-  which resolves `bash` via its own inherited `$PATH` internally.
+  substitute a different binary for any of them.
+- **Desktop notifications run under the same environment-cleared, fixed-path
+  discipline as fetches — not through the base shell's own `bar.run`
+  helper (resolves `bash` via inherited `$PATH` internally) or a bare
+  `Quickshell.execDetached` call.** `omarchy-notification-send` is itself a
+  `#!/bin/bash` script, so a fixed *path* to it alone doesn't stop the
+  kernel-started Bash (and the `busctl` it calls internally) from
+  inheriting whatever environment launched it — `execDetached` has no
+  environment control reachable from QML/JS (its `ProcessContext` overload
+  exists in principle but isn't constructible as a plain object at that
+  boundary — checked directly, and the base Omarchy shell itself never
+  uses it either). Notifications instead run through a dedicated,
+  disposable `Process` per call — `clearEnvironment: true` plus the same
+  minimal allowlist idea as fetches, `PATH` and (since the script reaches
+  the notification daemon via `busctl --user`) `XDG_RUNTIME_DIR`, read once
+  via `Quickshell.env` rather than inherited wholesale
+  (`Panel.qml`: `sendNotification`/`notifyProcComponent`). See
+  `scripts/manual-checks/notification-env-isolation.qml` for a standalone,
+  runnable proof that the resulting environment is *exactly* those two
+  variables and nothing else, and that the script still works under it.
 - **Every fetch process's environment is fully cleared, not merely
   PATH-overridden.** Fixed executable paths alone don't stop loader-level
   injection through inherited variables like `LD_PRELOAD` or
@@ -309,15 +325,16 @@ for QML warnings.
 
 `scripts/manual-checks/` holds standalone, runnable proofs for QML-only
 behavior too load-bearing to leave as an unrepeatable "verified by hand"
-claim — currently just `launch-failure-supersession.qml`, covering the
-process-launch-identity fix described above. Run with:
+claim — `launch-failure-supersession.qml` (the process-launch-identity fix)
+and `notification-env-isolation.qml` (the notification-Process environment
+restriction), both described above. Run either with:
 
 ```bash
-quickshell -p scripts/manual-checks/launch-failure-supersession.qml
+quickshell -p scripts/manual-checks/<name>.qml
 ```
 
-Expect `PASS` printed, then a clean exit; `quickshell` itself is required
-(part of Omarchy), not something CI installs, so this doesn't run
+Expect `PASS` line(s) printed, then a clean exit; `quickshell` itself is
+required (part of Omarchy), not something CI installs, so these don't run
 automatically.
 
 ## License

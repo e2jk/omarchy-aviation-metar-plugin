@@ -1,8 +1,6 @@
 import QtQuick
-import Quickshell
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
 
 BarWidget {
   id: root
@@ -31,6 +29,13 @@ BarWidget {
   // refreshed data actually differs from what was already showing.
   function refreshIfStale() {
     if (panelLoader.item && panelLoader.item.refreshIfStale) panelLoader.item.refreshIfStale()
+  }
+
+  // Routed through Panel.qml, which owns the environment-cleared,
+  // fixed-path Process this actually runs under (see its own
+  // sendNotification/notifyProcComponent) — not sent directly from here.
+  function sendNotification(text) {
+    if (panelLoader.item && panelLoader.item.sendNotification) panelLoader.item.sendNotification(text)
   }
 
   readonly property bool justUpdated: panelLoader.item ? panelLoader.item.justUpdated === true : false
@@ -111,10 +116,7 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.bar) return
-      // Sent directly by fixed path/argv (execDetached — no shell
-      // involved), not the base shell's own bar.run helper, which
-      // resolves "bash" via inherited PATH internally.
-      if (b === Qt.RightButton) Quickshell.execDetached([Model.TRUSTED_NOTIFICATION_SEND_PATH, root.barTooltip.replace(/\n/g, " · ")])
+      if (b === Qt.RightButton) root.sendNotification(root.barTooltip.replace(/\n/g, " · "))
       else if (b === Qt.MiddleButton) root.refreshManual()
       else root.togglePanel()
     }
