@@ -143,6 +143,33 @@ that "normally behaves" is enough to rely on:
   allocation, and the invalid-entries warning banner shows a capped list
   plus a truncated count (`"...and N more"`) rather than rendering an
   unbounded one.
+- **Every executable this plugin invokes itself is resolved by fixed,
+  absolute path — never a bare name looked up on `$PATH`.** Runtime
+  dependencies: `/usr/bin/bash`, `/usr/bin/curl`, `/usr/bin/head`,
+  `/usr/bin/timeout` — all base-system tools (bash, coreutils), always
+  present on Omarchy/Arch, never a third-party package. A user-writable
+  earlier `$PATH` entry can't substitute a different binary for any of
+  them; the `PATH` a fetch process actually runs with is also explicitly
+  overridden to just those two trusted directories, as a second layer on
+  top of the fixed paths (`Model.js`: `TRUSTED_*_PATH`/`TRUSTED_PATH_ENV`).
+  Clipboard copying doesn't shell out at all — it goes through Quickshell's
+  own native clipboard integration, no subprocess involved.
+- **Every fetch is bounded by an owned process tree, not just curl's own
+  timer.** curl's `--max-time` only bounds curl itself; the whole
+  `curl | head` pipeline additionally runs under an outer `timeout`, which
+  owns the complete process group and can tear all of it down — on its own
+  deadline, or on an explicit cancel signal sent when a newer request
+  supersedes an in-flight one, or when the plugin itself is torn down
+  (`Model.js`: `buildFetchCommand`; `Panel.qml`: `cancelMetarProc`/
+  `cancelTafProc`, `Component.onDestruction`).
+- **A settings change or manual/hover refresh while a fetch is already in
+  flight can't let that older fetch's result get committed as if it were
+  current.** Every request is tagged with a generation number; a result
+  whose generation no longer matches what's actually wanted is discarded
+  outright (never parsed, never committed, never allowed to drive
+  retry/offline state), and whatever was actually requested last runs as
+  soon as the in-flight one is cancelled and out of the way
+  (`Panel.qml`: `requestMetarFetch`/`requestTafFetch`).
 
 ## Install
 

@@ -82,6 +82,26 @@ function invalidAirportCount(raw) {
   return collectInvalidAirportEntries(raw).length
 }
 
+// ---- Fixed, trusted system paths for every executable this plugin invokes
+// itself. Never resolved via $PATH: a shell's PATH is user-writable
+// territory (an earlier entry could shadow the real binary with something
+// else entirely), so every path below is what Omarchy/Arch's base system
+// actually installs, letting the OS's own exec() be the only thing that
+// decides whether a binary exists and is runnable — no name-based lookup
+// in between, and no separate existence check to get out of sync with it
+// (a stat-then-exec check would itself be racy; exec's own atomic
+// exists-and-executable check is the authoritative one).
+var TRUSTED_BASH_PATH = "/usr/bin/bash"
+var TRUSTED_CURL_PATH = "/usr/bin/curl"
+var TRUSTED_HEAD_PATH = "/usr/bin/head"
+var TRUSTED_TIMEOUT_PATH = "/usr/bin/timeout"
+// Belt-and-braces alongside the fixed paths above: even if some future
+// change to this script ever adds a bare (non-absolute) command, this is
+// the only PATH it could ever resolve through. Panel.qml applies it as an
+// override on top of the inherited environment (not a full clear — proxy
+// vars like https_proxy and locale/HOME stay intact for curl to use).
+var TRUSTED_PATH_ENV = "/usr/bin:/bin"
+
 // ---- Fetch response byte cap. aviationweather.gov normally returns a few
 // KB for a dozen airports, but nothing stops a faulty proxy or a
 // compromised/DNS-hijacked responder from streaming far more, and curl's
@@ -99,8 +119,26 @@ function invalidAirportCount(raw) {
 // script string), so it never needs shell-quoting.
 var MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 function buildBoundedFetchScript(maxBytes) {
-  return "set -o pipefail; curl -fsS --max-time 8 --max-filesize " + maxBytes
-    + " \"$1\" | head -c " + (maxBytes + 1) + "; exit \"${PIPESTATUS[0]}\""
+  return "set -o pipefail; " + TRUSTED_CURL_PATH + " -fsS --max-time 8 --max-filesize " + maxBytes
+    + " \"$1\" | " + TRUSTED_HEAD_PATH + " -c " + (maxBytes + 1) + "; exit \"${PIPESTATUS[0]}\""
+}
+
+// The full argv Panel.qml hands to its Process: an outer `timeout` bounding
+// the *entire* process group the bounded-fetch script above spawns — curl's
+// own --max-time only bounds curl itself, not head, not a hung bash, and
+// not cleanup if the pipeline is cancelled (superseded by a newer request,
+// or the component is torn down) rather than left to run to completion.
+// --kill-after escalates to SIGKILL if SIGTERM alone doesn't end it.
+// Verified live (not assumed): sending SIGTERM to `timeout`'s own PID —
+// exactly what Panel.qml's cancellation does via Process.signal(15) — is
+// forwarded by `timeout` to the whole process group, killing curl and head
+// along with it, not just the immediate bash child.
+var OUTER_TIMEOUT_SECONDS = 12 // > curl's own 8s --max-time, so curl's own clean failure/exit code is what's normally seen
+function buildFetchCommand(url, maxBytes, label) {
+  return [
+    TRUSTED_TIMEOUT_PATH, "--kill-after=2", "--signal=TERM", String(OUTER_TIMEOUT_SECONDS),
+    TRUSTED_BASH_PATH, "-c", buildBoundedFetchScript(maxBytes), label, url
+  ]
 }
 
 function letterForCategory(category) {
@@ -844,7 +882,14 @@ if (typeof module !== "undefined") {
     invalidAirportEntries: invalidAirportEntries,
     invalidAirportCount: invalidAirportCount,
     MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
+    TRUSTED_BASH_PATH: TRUSTED_BASH_PATH,
+    TRUSTED_CURL_PATH: TRUSTED_CURL_PATH,
+    TRUSTED_HEAD_PATH: TRUSTED_HEAD_PATH,
+    TRUSTED_TIMEOUT_PATH: TRUSTED_TIMEOUT_PATH,
+    TRUSTED_PATH_ENV: TRUSTED_PATH_ENV,
+    OUTER_TIMEOUT_SECONDS: OUTER_TIMEOUT_SECONDS,
     buildBoundedFetchScript: buildBoundedFetchScript,
+    buildFetchCommand: buildFetchCommand,
     sanitizeApiList: sanitizeApiList,
     sanitizeMetarItem: sanitizeMetarItem,
     sanitizeTafItem: sanitizeTafItem,

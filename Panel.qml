@@ -180,12 +180,114 @@ Panel {
   readonly property string summary: Model.summaryLine(entries)
   readonly property bool loading: metarProc.running || (root.showTaf && tafProc.running)
 
+  // ---- Fetch generation tracking. Each of these Process objects is a
+  // single reused instance — it can only ever run one command at a time —
+  // but settings can change (or a manual/hover refresh can be requested)
+  // while one is still in flight. Without this, overwriting .command and
+  // re-setting running=true on an already-running Process is a no-op (the
+  // new request is silently dropped) while the *old* one's result still
+  // lands in onExited and gets committed as if it reflected the new
+  // request — stale data presented as current, or the "actually requested"
+  // fetch never happening at all.
+  //
+  // Fix: every genuinely new request (requestMetarFetch/requestTafFetch)
+  // bumps a generation counter. A process's own generation is frozen the
+  // moment it actually starts (metarProcGeneration/tafProcGeneration); if
+  // that no longer matches the live counter by the time it exits, the
+  // result is stale — discarded outright, never committed, never allowed
+  // to drive retry/offline state — and whatever was actually requested
+  // last (pendingMetarUrl/pendingTafUrl, which a queued request keeps
+  // overwriting with the latest desired state) starts as soon as the
+  // Process is free. Retries (scheduleMetarRetry/the retry Timers) reuse
+  // the current generation rather than minting a new one — a retry
+  // continues the same logical request, and is itself skipped if that
+  // generation has since been superseded while it was waiting to fire.
+  property int metarGeneration: 0
+  property int metarProcGeneration: -1
+  property int metarRetryGeneration: -1
+  property string pendingMetarUrl: ""
+  property int tafGeneration: 0
+  property int tafProcGeneration: -1
+  property int tafRetryGeneration: -1
+  property string pendingTafUrl: ""
+
+  function buildMetarUrl() {
+    return "https://aviationweather.gov/api/data/metar?ids="
+      + encodeURIComponent(airportList.join(",")) + "&format=json"
+  }
+
+  function buildTafUrl() {
+    return "https://aviationweather.gov/api/data/taf?ids="
+      + encodeURIComponent(airportList.join(",")) + "&format=json"
+  }
+
+  // The only entry point for "fetch current settings, as a genuinely new
+  // request" — used by manual refresh, the periodic timer, hover-refresh,
+  // and settings changes. Deliberately not used by retries, which continue
+  // the existing generation instead (see scheduleMetarRetry).
+  function requestMetarFetch() {
+    root.metarGeneration++
+    root.metarRetries = 0
+    root.startOrQueueMetarFetch(root.buildMetarUrl(), root.metarGeneration)
+  }
+
+  function requestTafFetch() {
+    root.tafGeneration++
+    root.tafRetries = 0
+    root.startOrQueueTafFetch(root.buildTafUrl(), root.tafGeneration)
+  }
+
+  // If the Process is already busy (an older generation still in flight),
+  // remember the latest desired request and cancel the old one rather than
+  // silently dropping the new request or letting two overlap on one
+  // Process; onExited notices the generation mismatch when the cancelled
+  // one actually exits, discards its result, and starts the pending
+  // request then — never blocking on it here.
+  function startOrQueueMetarFetch(url, generation) {
+    if (metarProc.running) {
+      root.pendingMetarUrl = url
+      root.cancelMetarProc()
+      return
+    }
+    root.metarProcGeneration = generation
+    metarProc.command = Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-metar")
+    metarProc.running = true
+  }
+
+  function startOrQueueTafFetch(url, generation) {
+    if (tafProc.running) {
+      root.pendingTafUrl = url
+      root.cancelTafProc()
+      return
+    }
+    root.tafProcGeneration = generation
+    tafProc.command = Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-taf")
+    tafProc.running = true
+  }
+
+  // Signals the *outer timeout process itself* — verified live (see
+  // Model.buildFetchCommand) to forward SIGTERM to the whole process group
+  // it started, tearing down curl and head along with the wrapper, not
+  // just the immediate child. Used both for supersession (a newer request
+  // arrived) and for component teardown (see Component.onDestruction
+  // below), so an in-flight fetch never outlives what still wants it.
+  function cancelMetarProc() {
+    if (metarProc.running) metarProc.signal(15) // SIGTERM
+  }
+
+  function cancelTafProc() {
+    if (tafProc.running) tafProc.signal(15)
+  }
+
+  Component.onDestruction: {
+    root.cancelMetarProc()
+    root.cancelTafProc()
+  }
+
   function refresh() {
-    metarRetries = 0
-    tafRetries = 0
     if (airportList.length === 0) return
-    fetchMetar()
-    if (root.showTaf) fetchTaf()
+    root.requestMetarFetch()
+    if (root.showTaf) root.requestTafFetch()
     else tafByIcao = {}
   }
 
@@ -201,20 +303,6 @@ Panel {
   // shell retain — see Model.buildBoundedFetchScript.
   readonly property int maxResponseBytes: Model.MAX_RESPONSE_BYTES
 
-  function fetchMetar() {
-    var url = "https://aviationweather.gov/api/data/metar?ids="
-      + encodeURIComponent(airportList.join(",")) + "&format=json"
-    metarProc.command = ["bash", "-c", Model.buildBoundedFetchScript(root.maxResponseBytes), "fetch-metar", url]
-    metarProc.running = true
-  }
-
-  function fetchTaf() {
-    var url = "https://aviationweather.gov/api/data/taf?ids="
-      + encodeURIComponent(airportList.join(",")) + "&format=json"
-    tafProc.command = ["bash", "-c", Model.buildBoundedFetchScript(root.maxResponseBytes), "fetch-taf", url]
-    tafProc.running = true
-  }
-
   function scheduleMetarRetry() {
     if (metarRetries >= 3) {
       root.metarOffline = true
@@ -223,6 +311,7 @@ Panel {
       return
     }
     metarRetries++
+    root.metarRetryGeneration = root.metarGeneration
     metarRetryTimer.restart()
   }
 
@@ -232,6 +321,7 @@ Panel {
       return
     }
     tafRetries++
+    root.tafRetryGeneration = root.tafGeneration
     tafRetryTimer.restart()
   }
 
@@ -262,22 +352,40 @@ Panel {
     return "Updated " + Qt.formatDateTime(new Date(root.lastUpdated * 1000), "dddd") + " " + clock
   }
 
-  // Same wl-copy pattern already used elsewhere in this shell (e.g.
-  // panels/network/Panel.qml, panels/tailscale/Service.qml) — copies
-  // whatever's currently on screen (coded or decoded, following decodeStyle,
-  // same as what clicking the text visibly shows), and confirms via a
-  // desktop notification, matching how this widget's own right-click
-  // summary already works.
+  // Native clipboard write via Qt/Quickshell's own clipboard integration —
+  // no subprocess, no shell, nothing to resolve via $PATH at all. Confirms
+  // via a desktop notification, matching how this widget's own right-click
+  // summary already works (that notification path is the base shell's own
+  // root.bar.run helper, not something this plugin invokes a shell for
+  // itself).
   function copyToClipboard(value, label) {
     if (!value) return
-    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(value) + " | wl-copy"])
+    Quickshell.clipboardText = value
     if (root.bar) root.bar.run("omarchy-notification-send " + Util.shellQuote(label + " copied"))
   }
 
   Process {
     id: metarProc
+    // Overrides only PATH on top of the inherited environment (proxy vars,
+    // locale, HOME, ... stay intact for curl to use) — belt-and-braces
+    // alongside every invoked path already being fixed/absolute (see
+    // Model.buildFetchCommand): even a future bare command name in the
+    // script could only ever resolve through this trusted directory.
+    environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: metarStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
+      // This specific launch's generation is frozen in metarProcGeneration
+      // when it started; if a newer request has since been made, this
+      // result belongs to nobody anymore — never commit it, never let it
+      // drive retry/offline state for the generation that's actually
+      // current. Whatever was actually requested last runs now instead.
+      if (root.metarProcGeneration !== root.metarGeneration) {
+        var nextUrl = root.pendingMetarUrl
+        root.pendingMetarUrl = ""
+        if (nextUrl !== "") root.startOrQueueMetarFetch(nextUrl, root.metarGeneration)
+        return
+      }
+
       // curl -f fails (nonzero) on a transport error or an HTTP error
       // status — that's the only case worth retrying/going offline over.
       // A *successful* request (exit 0) with an empty body happens for a
@@ -285,7 +393,9 @@ Panel {
       // when every requested id is unrecognized (verified live against
       // https://aviationweather.gov/api/data/metar?ids=ZZZZ). Treating
       // that as a transient failure would misreport "your airport list is
-      // invalid" as "we're offline" after retries exhaust.
+      // invalid" as "we're offline" after retries exhaust. A cancelled
+      // fetch (superseded/torn down) also exits non-zero, but is already
+      // handled by the generation check above before reaching here.
       if (exitCode !== 0) { root.scheduleMetarRetry(); return }
 
       // Belt-and-braces alongside the fetch-side head -c cap (see
@@ -331,13 +441,30 @@ Panel {
   Timer {
     id: metarRetryTimer
     interval: 3000
-    onTriggered: if (!metarProc.running) root.fetchMetar()
+    // Bound to the generation the retry was scheduled for — if that's
+    // since been superseded (settings changed, another refresh requested)
+    // while this timer was waiting, it's a no-op: the newer request either
+    // already started or will via its own path, and this stale retry must
+    // not double-fetch or fight over the shared Process.
+    onTriggered: {
+      if (metarProc.running) return
+      if (root.metarRetryGeneration !== root.metarGeneration) return
+      root.startOrQueueMetarFetch(root.buildMetarUrl(), root.metarGeneration)
+    }
   }
 
   Process {
     id: tafProc
+    environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: tafStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
+      if (root.tafProcGeneration !== root.tafGeneration) {
+        var nextUrl = root.pendingTafUrl
+        root.pendingTafUrl = ""
+        if (nextUrl !== "") root.startOrQueueTafFetch(nextUrl, root.tafGeneration)
+        return
+      }
+
       if (exitCode !== 0) { root.scheduleTafRetry(); return }
 
       var rawFull = String(tafStdout.text || "")
@@ -362,7 +489,11 @@ Panel {
   Timer {
     id: tafRetryTimer
     interval: 3000
-    onTriggered: if (!tafProc.running) root.fetchTaf()
+    onTriggered: {
+      if (tafProc.running) return
+      if (root.tafRetryGeneration !== root.tafGeneration) return
+      root.startOrQueueTafFetch(root.buildTafUrl(), root.tafGeneration)
+    }
   }
 
   Timer {
