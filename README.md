@@ -1,5 +1,7 @@
 # Aviation Weather (METAR/TAF) — an Omarchy bar plugin
 
+Published on the [Omarchy plugin marketplace](https://plugins.omarchy.org/plugin.html?id=metar-taf).
+
 A bar-widget plugin for [Omarchy](https://omarchy.org)'s Quickshell-based
 shell (Quattro and later) that shows **aviation** flight-category weather —
 **V**FR, **M**VFR, **I**FR, **L**IFR — for a list of airports you configure.
