@@ -146,14 +146,28 @@ that "normally behaves" is enough to rely on:
 - **Every executable this plugin invokes itself is resolved by fixed,
   absolute path — never a bare name looked up on `$PATH`.** Runtime
   dependencies: `/usr/bin/bash`, `/usr/bin/curl`, `/usr/bin/head`,
-  `/usr/bin/timeout` — all base-system tools (bash, coreutils), always
-  present on Omarchy/Arch, never a third-party package. A user-writable
-  earlier `$PATH` entry can't substitute a different binary for any of
-  them; the `PATH` a fetch process actually runs with is also explicitly
-  overridden to just those two trusted directories, as a second layer on
-  top of the fixed paths (`Model.js`: `TRUSTED_*_PATH`/`TRUSTED_PATH_ENV`).
-  Clipboard copying doesn't shell out at all — it goes through Quickshell's
-  own native clipboard integration, no subprocess involved.
+  `/usr/bin/timeout`, `/usr/bin/omarchy-notification-send` — all
+  base-system tools (bash, coreutils) or a genuine Omarchy-provided script,
+  never a third-party package. A user-writable earlier `$PATH` entry can't
+  substitute a different binary for any of them. Desktop notifications are
+  sent directly by fixed path/argv (`Quickshell.execDetached`, no shell
+  involved) rather than through the base shell's own `bar.run` helper,
+  which resolves `bash` via its own inherited `$PATH` internally.
+- **Every fetch process's environment is fully cleared, not merely
+  PATH-overridden.** Fixed executable paths alone don't stop loader-level
+  injection through inherited variables like `LD_PRELOAD` or
+  `LD_LIBRARY_PATH` — the dynamic linker honors those for *any* dynamically
+  linked executable regardless of how it's invoked, `/usr/bin/timeout`
+  included (verified directly: an `LD_PRELOAD`'d library loads into
+  `/usr/bin/timeout` itself when the environment is merely PATH-overridden,
+  and does not when the environment is fully cleared down to just `PATH`).
+  `PATH` is the one deliberate exception re-added on top of a cleared
+  environment (`Model.js`: `TRUSTED_PATH_ENV`; `Panel.qml`:
+  `clearEnvironment: true`) — proxy variables (`http_proxy`, etc.) included,
+  since this plugin only ever talks to one fixed public host with no auth
+  and has no setting to configure a proxy in the first place. Clipboard
+  copying doesn't shell out at all — it goes through Quickshell's own
+  native clipboard integration, no subprocess involved.
 - **Every fetch is bounded by an owned process tree, not just curl's own
   timer.** curl's `--max-time` only bounds curl itself; the whole
   `curl | head` pipeline additionally runs under an outer `timeout`, which
@@ -164,12 +178,28 @@ that "normally behaves" is enough to rely on:
   `cancelTafProc`, `Component.onDestruction`).
 - **A settings change or manual/hover refresh while a fetch is already in
   flight can't let that older fetch's result get committed as if it were
-  current.** Every request is tagged with a generation number; a result
-  whose generation no longer matches what's actually wanted is discarded
-  outright (never parsed, never committed, never allowed to drive
-  retry/offline state), and whatever was actually requested last runs as
-  soon as the in-flight one is cancelled and out of the way
-  (`Panel.qml`: `requestMetarFetch`/`requestTafFetch`).
+  current — including a change to settings that mean nothing should be
+  fetched at all.** Every request is tagged with a generation number; a
+  result whose generation no longer matches what's actually wanted is
+  discarded outright (never parsed, never committed, never allowed to
+  drive retry/offline state), and whatever was actually requested last
+  runs as soon as the in-flight one is cancelled and out of the way
+  (`Model.js`: `fetchPlan`; `Panel.qml`: `requestMetarFetch`/
+  `requestTafFetch`/`abandonMetarFetch`/`abandonTafFetch`). Clearing the
+  `airports` setting or turning TAF off *supersedes* an in-flight fetch for
+  the old settings the same way a genuinely new request does, rather than
+  just clearing already-fetched data and leaving that fetch free to land
+  and repopulate it moments later. A launch whose own process failed to
+  start at all (missing/broken executable) is tracked by an explicit
+  per-attempt sequence number, not a shared flag — the flag version has a
+  real race: a stale fetch's own settlement can synchronously start its
+  replacement before Quickshell delivers the stale one's own "no longer
+  running" signal, which then gets mistaken for the replacement's, silently
+  swallowing a real launch failure. See
+  `scripts/manual-checks/launch-failure-supersession.qml` for a standalone,
+  runnable proof of this specific fix — this repo has no QML process/
+  event-loop test harness (see Development below), so this is that fix's
+  regression coverage.
 
 ## Install
 
@@ -276,6 +306,19 @@ verified by hand: symlink into `~/.config/omarchy/plugins/metar-taf`,
 `omarchy-restart-shell` (`Model.js` changes — QML caches imported JS modules
 independently of the component reload), and check `journalctl --user -b`
 for QML warnings.
+
+`scripts/manual-checks/` holds standalone, runnable proofs for QML-only
+behavior too load-bearing to leave as an unrepeatable "verified by hand"
+claim — currently just `launch-failure-supersession.qml`, covering the
+process-launch-identity fix described above. Run with:
+
+```bash
+quickshell -p scripts/manual-checks/launch-failure-supersession.qml
+```
+
+Expect `PASS` printed, then a clean exit; `quickshell` itself is required
+(part of Omarchy), not something CI installs, so this doesn't run
+automatically.
 
 ## License
 

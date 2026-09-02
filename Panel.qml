@@ -211,18 +211,27 @@ Panel {
   property int tafRetryGeneration: -1
   property string pendingTafUrl: ""
 
-  // Set true as the first thing `exited` does, and cleared back to false by
-  // the `runningChanged(false)` that always follows a normal exit — so if
-  // `runningChanged(false)` ever fires while this is still false, `exited`
-  // never fired at all. Verified live: that's exactly what happens when the
-  // command itself can't be exec'd (missing/non-executable path, permission
-  // denied, ...) — Quickshell's Process only emits runningChanged(false),
-  // never `exited`, so without this a broken/missing system binary would
-  // silently strand the fetch (running already false, nothing else left to
-  // ever trigger a retry) instead of failing exactly as gracefully as a
-  // normal network failure does.
-  property bool metarProcSettled: false
-  property bool tafProcSettled: false
+  // Per-attempt launch identity — distinct from generation (which tracks
+  // *logical requests*, i.e. "what settings does this reflect"). This
+  // tracks *physical exec attempts*, i.e. "which specific `running = true`
+  // was this". Needed because a stale result's own onExited can
+  // synchronously start its replacement (see metarResultIsStale) *before*
+  // Quickshell delivers the old process's own runningChanged(false) — so a
+  // single shared "settled" boolean can't tell, when that (possibly
+  // deferred/coalesced) signal finally arrives, whether it's reporting the
+  // old launch settling or the brand-new replacement's own exec having
+  // just failed. Verified live (quickshell -c against an ad-hoc test
+  // shell): with a boolean flag, exactly that sequence — cancel a running
+  // launch, restart synchronously with a broken path — leaves the flag
+  // already true from the old launch, so the replacement's real exec
+  // failure gets silently swallowed as if it were just the old one
+  // settling, and no retry ever fires. Comparing the *sequence number* the
+  // signal arrives with against the sequence number of whatever is
+  // actually running now closes that regardless of delivery order/timing.
+  property int metarLaunchSeq: 0
+  property int metarSettledSeq: -1
+  property int tafLaunchSeq: 0
+  property int tafSettledSeq: -1
 
   function buildMetarUrl() {
     return "https://aviationweather.gov/api/data/metar?ids="
@@ -263,6 +272,7 @@ Panel {
       return
     }
     root.metarProcGeneration = generation
+    root.metarLaunchSeq++
     metarProc.command = Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-metar")
     metarProc.running = true
   }
@@ -274,8 +284,31 @@ Panel {
       return
     }
     root.tafProcGeneration = generation
+    root.tafLaunchSeq++
     tafProc.command = Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-taf")
     tafProc.running = true
+  }
+
+  // For when the current *desired* state is "nothing should be fetched"
+  // (no airports configured, or TAF just turned off) while a fetch for the
+  // old state may still be in flight or queued. Bumping the generation and
+  // clearing/cancelling here — without starting a replacement — is what
+  // refresh() uses for exactly that case; without it, an in-flight fetch's
+  // generation would still match (nothing ever advanced it) and its result
+  // would be accepted as current, committing data for settings that no
+  // longer apply.
+  function abandonMetarFetch() {
+    root.metarGeneration++
+    root.metarRetries = 0
+    root.pendingMetarUrl = ""
+    root.cancelMetarProc()
+  }
+
+  function abandonTafFetch() {
+    root.tafGeneration++
+    root.tafRetries = 0
+    root.pendingTafUrl = ""
+    root.cancelTafProc()
   }
 
   // Signals the *outer timeout process itself* — verified live (see
@@ -317,11 +350,27 @@ Panel {
     root.cancelTafProc()
   }
 
+  // The metar/taf "request" vs "abandon" decision (see Model.fetchPlan) is
+  // pure and unit-tested there; what each actually does to the live
+  // Process objects (cancel/start/signal) can't be — this just carries out
+  // whichever plan was decided. "abandon" supersedes/cancels anything
+  // still in flight for the old settings rather than merely clearing
+  // already-fetched data, so a fetch started under the old settings can
+  // never land and commit after they've changed.
   function refresh() {
-    if (airportList.length === 0) return
-    root.requestMetarFetch()
-    if (root.showTaf) root.requestTafFetch()
-    else tafByIcao = {}
+    var plan = Model.fetchPlan(root.airportList, root.showTaf)
+    if (plan.metar === "abandon") {
+      root.abandonMetarFetch()
+      root.metarByIcao = {}
+    } else {
+      root.requestMetarFetch()
+    }
+    if (plan.taf === "abandon") {
+      root.abandonTafFetch()
+      root.tafByIcao = {}
+    } else {
+      root.requestTafFetch()
+    }
   }
 
   // Entry point for the bar's middle-click / explicit "refresh" action —
@@ -387,27 +436,31 @@ Panel {
 
   // Native clipboard write via Qt/Quickshell's own clipboard integration —
   // no subprocess, no shell, nothing to resolve via $PATH at all. Confirms
-  // via a desktop notification, matching how this widget's own right-click
-  // summary already works (that notification path is the base shell's own
-  // root.bar.run helper, not something this plugin invokes a shell for
-  // itself).
+  // via a desktop notification sent directly by fixed path/argv
+  // (execDetached — no shell involved), not the base shell's own
+  // root.bar.run helper, which resolves "bash" via inherited PATH
+  // internally and isn't something this plugin's own fixes can reach.
   function copyToClipboard(value, label) {
     if (!value) return
     Quickshell.clipboardText = value
-    if (root.bar) root.bar.run("omarchy-notification-send " + Util.shellQuote(label + " copied"))
+    Quickshell.execDetached([Model.TRUSTED_NOTIFICATION_SEND_PATH, label + " copied"])
   }
 
   Process {
     id: metarProc
-    // Overrides only PATH on top of the inherited environment (proxy vars,
-    // locale, HOME, ... stay intact for curl to use) — belt-and-braces
-    // alongside every invoked path already being fixed/absolute (see
-    // Model.buildFetchCommand): even a future bare command name in the
-    // script could only ever resolve through this trusted directory.
+    // Fully cleared, not merged: fixed executable paths alone don't stop
+    // loader/interpreter-level injection through inherited variables like
+    // LD_PRELOAD, LD_LIBRARY_PATH, or bash's own BASH_ENV/ENV (honored by
+    // non-interactive `bash -c`, exactly how this is invoked) — those still
+    // apply to /usr/bin/timeout and /usr/bin/bash themselves regardless of
+    // how trusted their own path is. PATH is added back as the one
+    // documented exception (see Model.TRUSTED_PATH_ENV for why nothing
+    // else, proxy variables included, is re-added).
+    clearEnvironment: true
     environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: metarStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
-      root.metarProcSettled = true
+      root.metarSettledSeq = root.metarLaunchSeq
 
       // This specific launch's generation is frozen in metarProcGeneration
       // when it started; if a newer request has since been made, this
@@ -468,16 +521,17 @@ Panel {
     }
     onRunningChanged: {
       if (metarProc.running) return
-      if (root.metarProcSettled) { root.metarProcSettled = false; return }
-      // `exited` never fired for this launch — verified live that this is
-      // exactly what happens when the command itself can't be exec'd
-      // (missing/non-executable path, permission denied, ...), not
-      // something that can be told apart from a normal exit any other way.
-      // Route through the same staleness/retry handling `exited` would
-      // have used, so this fails exactly as gracefully as a network
-      // failure (retried, then reported offline) instead of leaving
-      // manualRefreshInFlight/hoverRefreshInFlight stuck true forever with
-      // nothing left to ever resolve them.
+      // metarSettledSeq already matching the *current* launch means
+      // `exited` already handled this exact attempt — nothing left to do.
+      // A mismatch means either `exited` never fired for this attempt at
+      // all (exec itself failed — verified live, see the property comment
+      // above), or it fired for an *older* attempt whose synchronous
+      // restart (see metarResultIsStale) already moved launchSeq forward
+      // before this signal was delivered; either way, this attempt itself
+      // has not been resolved yet, so resolve it now rather than mistaking
+      // a stale settlement for this one.
+      if (root.metarSettledSeq === root.metarLaunchSeq) return
+      root.metarSettledSeq = root.metarLaunchSeq
       if (root.metarResultIsStale()) return
       root.scheduleMetarRetry()
     }
@@ -500,10 +554,11 @@ Panel {
 
   Process {
     id: tafProc
+    clearEnvironment: true
     environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
     stdout: StdioCollector { id: tafStdout; waitForEnd: true }
     onExited: function(exitCode, exitStatus) {
-      root.tafProcSettled = true
+      root.tafSettledSeq = root.tafLaunchSeq
       if (root.tafResultIsStale()) return
 
       if (exitCode !== 0) { root.scheduleTafRetry(); return }
@@ -527,7 +582,8 @@ Panel {
     }
     onRunningChanged: {
       if (tafProc.running) return
-      if (root.tafProcSettled) { root.tafProcSettled = false; return }
+      if (root.tafSettledSeq === root.tafLaunchSeq) return
+      root.tafSettledSeq = root.tafLaunchSeq
       if (root.tafResultIsStale()) return
       root.scheduleTafRetry()
     }

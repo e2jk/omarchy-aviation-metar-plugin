@@ -95,11 +95,27 @@ var TRUSTED_BASH_PATH = "/usr/bin/bash"
 var TRUSTED_CURL_PATH = "/usr/bin/curl"
 var TRUSTED_HEAD_PATH = "/usr/bin/head"
 var TRUSTED_TIMEOUT_PATH = "/usr/bin/timeout"
+// A real Omarchy-provided script (#!/bin/bash), not a third-party binary —
+// same fixed-path treatment as the rest. Used directly via execDetached
+// (argv array, no shell) instead of the base shell's own bar.run helper,
+// which resolves "bash" via inherited PATH internally and isn't something
+// this plugin can fix from its own code.
+var TRUSTED_NOTIFICATION_SEND_PATH = "/usr/bin/omarchy-notification-send"
 // Belt-and-braces alongside the fixed paths above: even if some future
 // change to this script ever adds a bare (non-absolute) command, this is
-// the only PATH it could ever resolve through. Panel.qml applies it as an
-// override on top of the inherited environment (not a full clear — proxy
-// vars like https_proxy and locale/HOME stay intact for curl to use).
+// the only PATH it could ever resolve through. Panel.qml applies this on
+// top of a *fully cleared* environment (clearEnvironment: true) for its
+// fetch Processes — not a merge over the inherited one. Fixed paths alone
+// don't stop loader-level injection through variables like LD_PRELOAD,
+// LD_LIBRARY_PATH, or bash's own BASH_ENV/ENV (honored by non-interactive
+// `bash -c`, which is exactly how these are invoked); clearing everything
+// but PATH closes that regardless of what the inherited environment
+// contains. Deliberately no proxy-variable passthrough (http_proxy,
+// https_proxy, ...): this plugin only ever talks to one fixed public host
+// with no auth, has no setting to configure a proxy, and inheriting one
+// from environment would itself be a value this hardening exists to not
+// trust — verified live that a fully cleared environment (just PATH) still
+// fetches successfully.
 var TRUSTED_PATH_ENV = "/usr/bin:/bin"
 
 // ---- Fetch response byte cap. aviationweather.gov normally returns a few
@@ -139,6 +155,22 @@ function buildFetchCommand(url, maxBytes, label) {
     TRUSTED_TIMEOUT_PATH, "--kill-after=2", "--signal=TERM", String(OUTER_TIMEOUT_SECONDS),
     TRUSTED_BASH_PATH, "-c", buildBoundedFetchScript(maxBytes), label, url
   ]
+}
+
+// What refresh() should do for METAR/TAF given the current settings —
+// pure decision logic, kept separate from Panel.qml's actual
+// request/abandon side effects (which touch live Process objects this
+// file has no access to) so it can be exhaustively tested. "abandon" means
+// "supersede/cancel anything in flight for the old settings without
+// starting a replacement" — turning airports off (or an empty list) or
+// turning TAF off both need this, not just clearing already-fetched data,
+// or a fetch already in flight for the old settings can still land and
+// commit data for settings that no longer apply.
+function fetchPlan(airportList, showTaf) {
+  if (!airportList || airportList.length === 0) {
+    return { metar: "abandon", taf: "abandon" }
+  }
+  return { metar: "request", taf: showTaf ? "request" : "abandon" }
 }
 
 function letterForCategory(category) {
@@ -885,11 +917,13 @@ if (typeof module !== "undefined") {
     TRUSTED_BASH_PATH: TRUSTED_BASH_PATH,
     TRUSTED_CURL_PATH: TRUSTED_CURL_PATH,
     TRUSTED_HEAD_PATH: TRUSTED_HEAD_PATH,
+    TRUSTED_NOTIFICATION_SEND_PATH: TRUSTED_NOTIFICATION_SEND_PATH,
     TRUSTED_TIMEOUT_PATH: TRUSTED_TIMEOUT_PATH,
     TRUSTED_PATH_ENV: TRUSTED_PATH_ENV,
     OUTER_TIMEOUT_SECONDS: OUTER_TIMEOUT_SECONDS,
     buildBoundedFetchScript: buildBoundedFetchScript,
     buildFetchCommand: buildFetchCommand,
+    fetchPlan: fetchPlan,
     sanitizeApiList: sanitizeApiList,
     sanitizeMetarItem: sanitizeMetarItem,
     sanitizeTafItem: sanitizeTafItem,

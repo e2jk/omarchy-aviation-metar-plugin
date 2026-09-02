@@ -1,6 +1,8 @@
 import QtQuick
+import Quickshell
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
 BarWidget {
   id: root
@@ -109,7 +111,10 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.bar) return
-      if (b === Qt.RightButton) root.bar.run("omarchy-notification-send " + Util.shellQuote(root.barTooltip.replace(/\n/g, " · ")))
+      // Sent directly by fixed path/argv (execDetached — no shell
+      // involved), not the base shell's own bar.run helper, which
+      // resolves "bash" via inherited PATH internally.
+      if (b === Qt.RightButton) Quickshell.execDetached([Model.TRUSTED_NOTIFICATION_SEND_PATH, root.barTooltip.replace(/\n/g, " · ")])
       else if (b === Qt.MiddleButton) root.refreshManual()
       else root.togglePanel()
     }
