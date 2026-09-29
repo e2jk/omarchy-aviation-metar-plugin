@@ -32,10 +32,18 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
-if command -v qmllint >/dev/null 2>&1; then
-  qmllint_bin=qmllint
-elif [[ -x /usr/lib/qt6/bin/qmllint ]]; then
+# The fixed Qt6 path is checked first, not last: a `qmllint` resolved via
+# PATH is not necessarily the Qt6 one this script's whole category-flag
+# extraction is written against — confirmed live on a machine that also has
+# qt5-declarative installed, whose own (PATH-first) qmllint 1.0 has none of
+# the `--<category> <level>` options at all, so the extraction below found
+# zero categories, ran with zero flags, and failed opaquely with no output.
+# Same "a fixed, known path beats an ambiguous PATH lookup" reasoning
+# Model.js applies to every executable this plugin itself shells out to.
+if [[ -x /usr/lib/qt6/bin/qmllint ]]; then
   qmllint_bin=/usr/lib/qt6/bin/qmllint
+elif command -v qmllint >/dev/null 2>&1; then
+  qmllint_bin=qmllint
 else
   echo "run-qmllint: qmllint not found, skipping QML lint" >&2
   exit 0
