@@ -61,6 +61,23 @@ describe("retryDelayMs", () => {
   })
 })
 
+describe("isResumeGap", () => {
+  it("is false for a tick that fired on schedule, or only mildly late under load", () => {
+    assert.equal(M.isResumeGap(60000, 60000), false) // exactly on time
+    assert.equal(M.isResumeGap(89000, 60000), false) // within the slack window
+  })
+
+  it("is true once the gap exceeds the interval plus slack", () => {
+    assert.equal(M.isResumeGap(91000, 60000), true)
+    assert.equal(M.isResumeGap(3 * 60 * 60 * 1000, 60000), true) // e.g. a 3h suspend
+  })
+
+  it("scales with whatever tick interval is passed in, not a fixed number", () => {
+    assert.equal(M.isResumeGap(46000, 15000), true) // > 15000 + 30000 slack
+    assert.equal(M.isResumeGap(20000, 15000), false)
+  })
+})
+
 // Direct regression test for "Panel.qml overrides only PATH while
 // inheriting the rest of the environment" — proves both halves for real
 // against the exact command Panel.qml builds, using the exact mechanic

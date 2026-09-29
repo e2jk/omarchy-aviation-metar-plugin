@@ -87,11 +87,39 @@ Panel {
   // fetch happens — otherwise a station whose last report ages past
   // maxAgeMinutes would only flip to "no data" at the next refresh cycle.
   property double nowTick: Date.now() / 1000
+  // This tick's own wall-clock timestamp, kept alongside nowTick so the
+  // Timer below can tell "fired on schedule" apart from "this process was
+  // just frozen by suspend and has resumed" — see Model.isResumeGap for why
+  // that isn't the same thing as just checking the interval elapsed.
+  property double lastNowTickAt: Date.now()
+  readonly property int nowTickIntervalMs: 60000
   Timer {
-    interval: 60000
+    interval: root.nowTickIntervalMs
     running: true
     repeat: true
-    onTriggered: root.nowTick = Date.now() / 1000
+    onTriggered: {
+      var now = Date.now()
+      var gap = now - root.lastNowTickAt
+      root.lastNowTickAt = now
+      root.nowTick = now / 1000
+      // refreshTimer is left mid-countdown when suspend hits and resumes
+      // with whatever countdown was left, not from zero — it can take up
+      // to a full refreshMinutes cycle after waking to fire on its own,
+      // even though the data is already visibly stale (see buildEntries'
+      // maxAgeMinutes check, which nowTick above just fed real elapsed
+      // time into). Forcing a refresh here, the moment a resume is
+      // detected, is what actually closes that gap; the existing
+      // retry-backoff (see scheduleMetarRetry) already covers the case
+      // where network isn't back yet at the moment this fires. Left as an
+      // extra, not a replacement, for whenever refreshTimer itself
+      // eventually also fires post-resume — generation tracking (see
+      // requestMetarFetch) already makes an overlapping fetch a no-op-ish
+      // supersede rather than a race, so there's nothing to reconcile here.
+      if (Model.isResumeGap(gap, root.nowTickIntervalMs)) {
+        console.log("[metar-taf] resume detected (tick gap " + gap + "ms > expected " + root.nowTickIntervalMs + "ms) — forcing refresh")
+        root.refresh()
+      }
+    }
   }
 
   // ---- Fetch state. Metar data is kept around even after a failed refresh —
@@ -411,9 +439,12 @@ Panel {
       // rather than only once backoff eventually stops too (it doesn't).
       root.metarOffline = true
       root.manualRefreshInFlight = false
+      console.log("[metar-taf] METAR fetch offline after " + Model.RETRY_FAST_ATTEMPTS + " fast attempts — backing off")
     }
+    var delay = Model.retryDelayMs(metarRetries)
+    console.log("[metar-taf] METAR fetch failed (attempt " + metarRetries + "), retrying in " + delay + "ms")
     root.metarRetryGeneration = root.metarGeneration
-    metarRetryTimer.interval = Model.retryDelayMs(metarRetries)
+    metarRetryTimer.interval = delay
     metarRetryTimer.restart()
     Qt.callLater(root.maybeFinishHoverRefresh)
   }
@@ -553,6 +584,7 @@ Panel {
         }
       }
 
+      if (root.metarOffline) console.log("[metar-taf] METAR fetch recovered after " + root.metarRetries + " retries")
       root.metarByIcao = Model.buildByIcao(Model.sanitizeApiList(parsed).map(Model.sanitizeMetarItem))
       // Reassign (not mutate-in-place) so the `entries` binding, which
       // reads this property, actually re-evaluates. Only ever tracks

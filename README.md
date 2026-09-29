@@ -96,9 +96,19 @@ independent checks feed into that:
   cached — but retrying doesn't stop there. It backs off and keeps trying
   quietly in the background (10s, 30s, 1min, then every 5min) rather than
   waiting for the next full `refreshMinutes` cycle or a manual/hover
-  refresh to notice connectivity is back — the case that matters most is
-  waking from suspend, where a fetch can fire before Wi-Fi has reconnected
-  (`Model.js`: `retryDelayMs`; `Panel.qml`: `scheduleMetarRetry`).
+  refresh to notice connectivity is back (`Model.js`: `retryDelayMs`;
+  `Panel.qml`: `scheduleMetarRetry`).
+- **Waking from suspend** — a QML `Timer` schedules off the event loop's own
+  monotonic clock, which doesn't advance while the machine is suspended, so
+  `refreshMinutes`'s own timer can take up to a full cycle after waking to
+  fire on its own — long after the bar has already gone stale. The
+  once-a-minute staleness tick (`nowTick`) compares its own wall-clock
+  timestamp against the previous one; a gap much bigger than a minute means
+  the process was just frozen by suspend, and that's what forces an
+  immediate refresh (which can still fail once or twice if Wi-Fi isn't back
+  yet — the reachability retries above pick that up) instead of waiting on
+  the delayed timer (`Model.js`: `isResumeGap`; `Panel.qml`: the `nowTick`
+  `Timer`'s `onTriggered`).
 - **Report age** — even when the fetch itself succeeds, a station's own
   observation time (`obsTime`) is checked against `maxAgeMinutes`. A quiet
   station (equipment fault, no reports outside operating hours, ...) ages

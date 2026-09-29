@@ -198,6 +198,26 @@ function retryDelayMs(attempt) {
   return RETRY_BACKOFF_MS[idx]
 }
 
+// How much more wall-clock time than a Timer's own interval has to pass
+// between two of its firings for that to mean "this process was frozen by
+// suspend", not just "running a bit behind under load". Panel.qml's own
+// periodic timers (refreshTimer, metarRetryTimer, ...) are QML Timers,
+// which schedule off the event loop's monotonic clock — a clock that does
+// not advance while the machine is suspended. A Timer mid-countdown when
+// suspend hits resumes with whatever countdown was left, not from zero, so
+// it can take up to a full interval after waking before it fires on its
+// own — exactly the "stuck on ? until I hover" symptom, even though the
+// data is already visibly stale by then. Comparing a tick's real wall-clock
+// timestamp (Date.now(), which keeps advancing across suspend) against the
+// previous one is a clock-domain-independent way to notice this happened.
+// A real suspend/resume gap is normally minutes to hours; 30s of slack over
+// the ordinary tick interval is generous headroom against plain scheduling
+// jitter under load, without risking a multi-minute suspend going unnoticed.
+var RESUME_GAP_SLACK_MS = 30000
+function isResumeGap(gapMs, tickIntervalMs) {
+  return gapMs > tickIntervalMs + RESUME_GAP_SLACK_MS
+}
+
 function letterForCategory(category) {
   switch (String(category || "").toUpperCase()) {
     case "VFR": return "V"
@@ -966,6 +986,7 @@ if (typeof module !== "undefined") {
     fetchPlan: fetchPlan,
     RETRY_FAST_ATTEMPTS: RETRY_FAST_ATTEMPTS,
     retryDelayMs: retryDelayMs,
+    isResumeGap: isResumeGap,
     sanitizeApiList: sanitizeApiList,
     sanitizeMetarItem: sanitizeMetarItem,
     sanitizeTafItem: sanitizeTafItem,
