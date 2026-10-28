@@ -56,8 +56,15 @@ Panel {
     return false
   }
 
+  // Third-party plugins get a restricted bar API whose
+  // centerHoverRevealSuppressed is read-only: assigning it throws, which
+  // used to abort close() before controller.hide() and leave the popup stuck
+  // open. Prefer the setter, and only fall back to assigning on shells that
+  // predate it (same order as omarchy.weather).
   function setCenterHoverRevealSuppressed(value) {
-    if (root.bar && "centerHoverRevealSuppressed" in root.bar)
+    if (root.bar && typeof root.bar.setCenterHoverRevealSuppressed === "function")
+      root.bar.setCenterHoverRevealSuppressed(value)
+    else if (root.bar && "centerHoverRevealSuppressed" in root.bar)
       root.bar.centerHoverRevealSuppressed = value
   }
 
