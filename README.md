@@ -42,7 +42,7 @@ and its JSON/XML responses only ever carry the coded text plus separate
 numeric fields, never a narrative string. A capable npm library
 (`metar-taf-parser`) exists, but this plugin ships as flat files that
 `omarchy plugin add` git-clones straight onto people's machines with no
-`npm install` step, and runs unsandboxed inside their shell — so pulling in
+dependency-install step, and runs unsandboxed inside their shell — so pulling in
 a third-party dependency here would mean everyone installing this plugin is
 also trusting that dependency's code, for a feature that's a ~150-line
 decoder over fields already parsed in `Model.js`. Decoded to English covers:
@@ -315,9 +315,10 @@ using Node's built-in `node:test` — no test framework dependency):
 npm test    # runs the suite, fails if line/branch/function coverage < 100%
 ```
 
-`npm install` wires up a `pre-push` git hook (`scripts/git-hooks/pre-push`)
-that blocks the push if any of the following fail — the same checks run in
-`.github/workflows/test.yml`. All of it currently takes well under a
+Running npm's dependency install once in a dev checkout triggers the
+`prepare` script in `package.json`, which wires up a `pre-push` git hook
+(`scripts/git-hooks/pre-push`) that blocks the push if any of the
+following fail — the same checks run in `.github/workflows/test.yml`. All of it currently takes well under a
 second, so it's a hard gate rather than advisory; if that ever grows slow
 enough to be friction, that's worth revisiting rather than just dropping a
 check. Every check runs even after an earlier one fails, so one push

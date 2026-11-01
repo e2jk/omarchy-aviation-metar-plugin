@@ -1,6 +1,6 @@
 #!/bin/sh
 # Blocks a push if any of these checks fail. Installed automatically by
-# `npm install` (package.json's "prepare" script sets core.hooksPath here).
+# npm's dependency install (package.json's "prepare" script sets core.hooksPath here).
 # Runs every check even after one fails, so a single push attempt surfaces
 # everything wrong at once rather than making you fix-and-repush repeatedly.
 # Quiet on success (a one-line "ok" per check, plus the test suite's own
