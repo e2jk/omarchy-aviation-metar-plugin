@@ -52,7 +52,10 @@ describe("API-decoded METAR blocks", () => {
 describe("matching explanations to the displayed observation", () => {
   it("shows an explanation only for the exact same raw report", () => {
     const decoded = M.parseDecodedMetars(block)
-    assert.equal(M.decodedMetarText({ icaoId: "ebaw", rawOb: raw }, decoded), block.trim())
+    const explanation = M.decodedMetarText({ icaoId: "ebaw", rawOb: raw }, decoded)
+    assert.equal(explanation, block.replace("  Text: " + raw + "\n", "").trim())
+    assert.doesNotMatch(explanation, /Text: METAR/)
+    assert.equal(decoded.EBAW.rawOb, raw)
     assert.equal(M.decodedMetarText({ icaoId: "EBAW", rawOb: raw + " NOSIG" }, decoded), "Decoded METAR unavailable for this report.")
   })
 

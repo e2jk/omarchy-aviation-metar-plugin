@@ -533,7 +533,11 @@ function parseDecodedMetars(text) {
 function decodedMetarText(metar, decodedByIcao) {
   if (!metar) return ""
   var decoded = decodedByIcao[String(metar.icaoId || "").toUpperCase()]
-  if (decoded && decoded.rawOb === metar.rawOb) return decoded.text
+  if (decoded && decoded.rawOb === metar.rawOb) {
+    // The raw report is already displayed/copied separately. Keep the
+    // provider's explanation, without echoing its embedded raw Text line.
+    return decoded.text.replace(/^ +Text: [^\r\n]+\r?\n?/m, "").trim()
+  }
   return "Decoded METAR unavailable for this report."
 }
 

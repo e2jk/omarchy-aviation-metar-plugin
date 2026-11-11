@@ -38,8 +38,9 @@ reveals the explanation returned by aviationweather.gov's
 explanation primary and the raw METAR the alternate view. The bar's hover
 always shows raw METARs.
 
-We keep the API's explanation verbatim instead of generating an English
-narrative ourselves. Its units are chosen by the provider, independently of
+We keep the API's explanation instead of generating an English narrative
+ourselves, omitting its redundant raw-report `Text:` line because the raw
+METAR is already shown separately. Its units are chosen by the provider, independently of
 our `units` setting (which still controls the structured stats). A separate
 batched request obtains these explanations; the JSON response still supplies
 raw reports, flight categories, and the numeric fields for the popup.
