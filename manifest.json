@@ -50,10 +50,10 @@
       {
         "key": "decodeStyle",
         "type": "enum",
-        "label": "METAR/TAF report style",
+        "label": "METAR report style",
         "options": ["Decoded", "Coded"],
-        "defaultValue": "Decoded",
-        "description": "Decoded: plain-English report, hover to see the raw coded text. Coded: raw METAR/TAF text, hover to see it decoded."
+        "defaultValue": "Coded",
+        "description": "Coded: raw METAR, hover for the API explanation. Decoded: API explanation, hover for raw METAR. TAF is raw with a locally decoded explanation on hover."
       },
       {
         "key": "maxAgeMinutes",

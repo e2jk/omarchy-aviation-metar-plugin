@@ -79,10 +79,9 @@ Panel {
   readonly property bool imperial: setting("units", "Metric") === "Imperial"
   readonly property bool showTaf: setting("showTaf", true) === true
   readonly property int refreshMinutes: Math.max(5, Math.min(60, parseInt(setting("refreshMinutes", 10), 10) || 10))
-  // Decoded English is the default (friendlier for anyone who doesn't read
-  // METAR groups); hovering the report always reveals whichever form isn't
-  // the primary one.
-  readonly property bool decoded: setting("decodeStyle", "Decoded") !== "Coded"
+  // Raw reports are primary; the API supplies the optional METAR explanation.
+  // Hovering the METAR reveals whichever form isn't the primary one.
+  readonly property bool decoded: setting("decodeStyle", "Coded") === "Decoded"
   readonly property int maxAgeMinutes: Math.max(10, Math.min(180, parseInt(setting("maxAgeMinutes", 40), 10) || 40))
   readonly property int hoverRefreshMinutes: Math.max(1, Math.min(30, parseInt(setting("hoverRefreshMinutes", 2), 10) || 2))
 
@@ -391,6 +390,9 @@ Panel {
   }
 
   Component.onDestruction: {
+    root.decodedGeneration++
+    decodedRetryTimer.stop()
+    if (root.decodedProc && root.decodedProc.running) root.decodedProc.signal(15)
     root.cancelMetarProc()
     root.cancelTafProc()
   }
@@ -403,6 +405,7 @@ Panel {
   // already-fetched data, so a fetch started under the old settings can
   // never land and commit after they've changed.
   function refresh() {
+    root.requestDecodedMetars()
     var plan = Model.fetchPlan(root.airportList, root.showTaf)
     if (plan.metar === "abandon") {
       root.abandonMetarFetch()
@@ -536,6 +539,84 @@ Panel {
     if (!text) return
     var proc = notifyProcComponent.createObject(root, { command: [Model.TRUSTED_NOTIFICATION_SEND_PATH, text] })
     if (proc) proc.running = true
+  }
+
+  // A separate, batched plain-text request supplies the authoritative METAR
+  // explanation. Each launch has its own Process, so superseded callbacks
+  // cannot settle a newer launch or attach explanations to different reports.
+  property var decodedByIcao: ({})
+  property var decodedProc: null
+  property int decodedGeneration: 0
+  property int decodedRetries: 0
+
+  function requestDecodedMetars() {
+    root.decodedGeneration++
+    root.decodedRetries = 0
+    decodedRetryTimer.stop()
+    if (root.decodedProc && root.decodedProc.running) root.decodedProc.signal(15)
+    root.decodedProc = null
+    if (root.airportList.length === 0) {
+      root.decodedByIcao = {}
+      return
+    }
+    root.startDecodedMetars()
+  }
+
+  function startDecodedMetars() {
+    var url = "https://aviationweather.gov/api/data/metar?ids="
+      + encodeURIComponent(root.airportList.join(",")) + "&format=decoded"
+    var proc = decodedProcComponent.createObject(root, {
+      generation: root.decodedGeneration,
+      command: Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-decoded-metar")
+    })
+    root.decodedProc = proc
+    proc.running = true
+  }
+
+  function acceptDecodedMetars(generation, exitCode, text) {
+    if (generation !== root.decodedGeneration) return
+    root.decodedProc = null
+    if (exitCode !== 0 || text.length > root.maxResponseBytes) {
+      root.decodedRetries++
+      decodedRetryTimer.interval = Model.retryDelayMs(root.decodedRetries)
+      decodedRetryTimer.restart()
+      return
+    }
+    root.decodedByIcao = Model.parseDecodedMetars(text)
+    root.decodedRetries = 0
+  }
+
+  Timer {
+    id: decodedRetryTimer
+    onTriggered: root.startDecodedMetars()
+  }
+
+  Component {
+    id: decodedProcComponent
+    Process {
+      id: proc
+      property int generation: -1
+      property bool settled: false
+      clearEnvironment: true
+      environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
+      stdout: StdioCollector { id: decodedOutput; waitForEnd: true }
+      onExited: function(exitCode, exitStatus) {
+        settled = true
+        root.acceptDecodedMetars(generation, exitCode, String(decodedOutput.text || ""))
+        destroy()
+      }
+      onRunningChanged: {
+        if (running) return
+        // Failed exec does not emit exited. Defer to give a normal exit
+        // its chance to settle first, and handle a failed launch only once.
+        Qt.callLater(function() {
+          if (!proc || proc.settled) return
+          proc.settled = true
+          root.acceptDecodedMetars(proc.generation, -1, "")
+          proc.destroy()
+        })
+      }
+    }
   }
 
   Process {
@@ -994,8 +1075,8 @@ Panel {
                 wrapMode: Text.WordWrap
               }
 
-              // ---- METAR: coded or decoded is the primary text (decoded by
-              // default), hovering always reveals whichever one isn't shown.
+              // ---- METAR: raw by default, with the API explanation as the
+              // alternate view. Never generate a narrative locally.
               Text {
                 id: metarText
                 visible: card.metar !== null
@@ -1004,7 +1085,7 @@ Panel {
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(16)
                 textFormat: Text.PlainText
-                text: card.metar ? (root.decoded ? Model.decodeMetarText(card.metar, root.imperial) : card.metar.rawOb) : ""
+                text: card.metar ? (root.decoded ? Model.decodedMetarText(card.metar, root.decodedByIcao) : card.metar.rawOb) : ""
                 color: Qt.darker(root.bar.foreground, 1.2)
                 font.family: root.decoded ? root.bar.fontFamily : "monospace"
                 font.pixelSize: Style.font.caption
@@ -1028,7 +1109,7 @@ Panel {
                   visible: metarHover.hovered && card.metar !== null
                   delay: 300
                   width: Style.space(360)
-                  text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodeMetarText(card.metar, root.imperial)) : "")
+                  text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodedMetarText(card.metar, root.decodedByIcao)) : "")
                     + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " METAR currently displayed, not the " + (root.decoded ? "coded" : "decoded") + " text in this tooltip"
                   contentItem: Text {
                     width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
@@ -1059,7 +1140,8 @@ Panel {
                 font.italic: true
               }
 
-              // ---- TAF: same coded/decoded + hover-reveals-the-other pattern.
+              // ---- TAF: raw first, with the local decoder on hover because
+              // the API does not offer a decoded TAF format.
               Column {
                 visible: root.showTaf && card.taf !== null
                 anchors.left: parent.left
@@ -1079,9 +1161,9 @@ Panel {
                 Text {
                   id: tafText
                   textFormat: Text.PlainText
-                  text: card.taf ? (root.decoded ? Model.decodeTafText(card.taf, root.imperial, root.formatEpoch) : card.taf.rawTAF) : ""
+                  text: card.taf ? card.taf.rawTAF : ""
                   color: Qt.darker(root.bar.foreground, 1.2)
-                  font.family: root.decoded ? root.bar.fontFamily : "monospace"
+                  font.family: "monospace"
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WordWrap
                   width: parent.width
@@ -1097,14 +1179,14 @@ Panel {
                     visible: tafHover.hovered && card.taf !== null
                     delay: 300
                     width: Style.space(360)
-                    text: (card.taf ? (root.decoded ? card.taf.rawTAF : Model.decodeTafText(card.taf, root.imperial, root.formatEpoch)) : "")
-                      + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " TAF currently displayed, not the " + (root.decoded ? "coded" : "decoded") + " text in this tooltip"
+                    text: (card.taf ? Model.decodeTafText(card.taf, root.imperial, root.formatEpoch) : "")
+                      + "\n\nClick copies the raw TAF currently displayed."
                     contentItem: Text {
                       width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText
                       text: tafToolTip.text
                       color: root.bar.foreground
-                      font.family: root.decoded ? "monospace" : root.bar.fontFamily
+                      font.family: root.bar.fontFamily
                       font.pixelSize: Style.font.caption
                       wrapMode: Text.WordWrap
                     }

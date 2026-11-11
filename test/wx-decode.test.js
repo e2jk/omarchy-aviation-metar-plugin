@@ -67,56 +67,6 @@ describe("decodeWxString", () => {
   })
 })
 
-describe("decodeMetarText", () => {
-  it("returns '' for a null metar", () => {
-    assert.equal(M.decodeMetarText(null, false), "")
-  })
-
-  it("describes calm wind", () => {
-    var metar = { wspd: 0, temp: 20, dewp: 10, altim: 1013, rawOb: "" }
-    assert.match(M.decodeMetarText(metar, false), /^Wind calm\./)
-  })
-
-  it("omits the wind sentence entirely when wspd is missing", () => {
-    var metar = { temp: 20, dewp: 10, altim: 1013, rawOb: "" }
-    assert.doesNotMatch(M.decodeMetarText(metar, false), /Wind/)
-  })
-
-  it("describes CAVOK distinctly and skips the separate clouds line", () => {
-    var metar = {
-      wdir: 240, wspd: 12, temp: 19, dewp: 10, altim: 1015,
-      rawOb: "METAR EHAM 311555Z 24012KT CAVOK 19/10 Q1015 NOSIG"
-    }
-    var text = M.decodeMetarText(metar, false)
-    assert.match(text, /CAVOK/)
-    assert.doesNotMatch(text, /Clouds:/)
-  })
-
-  it("includes a visibility line when parseable", () => {
-    var metar = {
-      wdir: 270, wspd: 14, temp: 21, dewp: 11, altim: 1014, clouds: [{ cover: "SCT", base: 3800 }],
-      rawOb: "METAR EBAW 311550Z 27014KT 9999 SCT038 21/11 Q1014"
-    }
-    assert.match(M.decodeMetarText(metar, false), /Visibility 10\+ km/)
-  })
-
-  it("includes decoded weather when wxString is present", () => {
-    var metar = {
-      wdir: 220, wspd: 12, wxString: "SHRA", temp: 18, dewp: 15, altim: 1009, clouds: [{ cover: "BKN", base: 1800 }],
-      rawOb: "METAR EDDF 311550Z 22012KT 6000 SHRA BKN018 18/15 Q1009 NOSIG"
-    }
-    assert.match(M.decodeMetarText(metar, false), /Rain showers/)
-  })
-
-  it("appends the NOSIG/BECMG/TEMPO trend sentence", () => {
-    var base = { wspd: 0, temp: 20, dewp: 10, altim: 1013 }
-    assert.match(M.decodeMetarText({ ...base, rawOb: "... NOSIG" }, false), /No significant change expected\.$/)
-    assert.match(M.decodeMetarText({ ...base, rawOb: "... BECMG 3118/3120" }, false), /Conditions expected to become different/)
-    assert.match(M.decodeMetarText({ ...base, rawOb: "... TEMPO 3115/3116" }, false), /Temporary fluctuations expected/)
-    assert.doesNotMatch(M.decodeMetarText({ ...base, rawOb: "..." }, false), /expected/)
-  })
-})
-
 describe("decodeTafText", () => {
   it("returns '' when there is no TAF or no fcsts", () => {
     assert.equal(M.decodeTafText(null, false, null), "")

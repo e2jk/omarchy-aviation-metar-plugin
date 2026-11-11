@@ -7,15 +7,15 @@ shell (Quattro and later) that shows **aviation** flight-category weather —
 **V**FR, **M**VFR, **I**FR, **L**IFR — for a list of airports you configure.
 It lives in the bar's center section by default, alongside the clock,
 weather, and the other status indicators. Click it for the full picture:
-METAR and TAF for every configured station, decoded to plain English by
-default (hover to see the raw coded text, or flip the default).
+raw METAR and TAF for every configured station, with an API-provided
+METAR explanation available on hover (or as the primary METAR view).
 
 ```
 Mon 31 Aug 18:06   V V V
 ```
 
-Click opens a popup with one card per airport — decoded stats, and the
-METAR/TAF report itself (coded or decoded, your choice — see below).
+Click opens a popup with one card per airport — structured stats, raw TAF,
+and the METAR in coded or API-decoded form (see below).
 
 ![The detail popup, showing three airport cards](preview.png)
 
@@ -32,25 +32,25 @@ a status warning; stations without a report show their code and status.
 
 ## Coded vs. decoded
 
-Each station's METAR/TAF can be shown as the raw coded text pilots read
-(`METAR EBAW 311550Z 27014G25KT 9999 SCT038 21/11 Q1014 NOSIG`) or as a
-plain-English sentence built from the same underlying fields. Hovering the
-report always shows whichever form isn't currently the primary one, so
-neither reading is more than a hover away.
+Raw coded METAR and TAF are shown first by default. Hovering a METAR
+reveals the explanation returned by aviationweather.gov's
+`format=decoded` endpoint. Set `decodeStyle` to `Decoded` to make that
+explanation primary and the raw METAR the alternate view. The bar's hover
+always shows raw METARs.
 
-There's no external decode API to lean on for this — checked first:
-aviationweather.gov rejects a `units`/`decoded` query parameter outright,
-and its JSON/XML responses only ever carry the coded text plus separate
-numeric fields, never a narrative string. A capable npm library
-(`metar-taf-parser`) exists, but this plugin ships as flat files that
-`omarchy plugin add` git-clones straight onto people's machines with no
-dependency-install step, and runs unsandboxed inside their shell — so pulling in
-a third-party dependency here would mean everyone installing this plugin is
-also trusting that dependency's code, for a feature that's a ~150-line
-decoder over fields already parsed in `Model.js`. Decoded to English covers:
-wind, visibility, present weather (rain/fog/thunderstorms/...), cloud
-layers, temperature/dewpoint, altimeter, and NOSIG/BECMG/TEMPO trend, for
-both METAR and each TAF change group.
+We keep the API's explanation verbatim instead of generating an English
+narrative ourselves. Its units are chosen by the provider, independently of
+our `units` setting (which still controls the structured stats). A separate
+batched request obtains these explanations; the JSON response still supplies
+raw reports, flight categories, and the numeric fields for the popup.
+An explanation is displayed only when its embedded raw observation exactly
+matches the METAR currently shown. If unavailable or out of sync, the popup
+says so rather than substituting a local translation.
+
+The API does **not** support `format=decoded` for TAF (it returns HTTP 400).
+TAFs therefore remain raw in both display modes, with our local TAF decoder
+providing their explanation on hover. Only METAR explanations come from the
+API.
 
 ## Data source
 
@@ -281,7 +281,7 @@ Set these from Setup → Plugins in the Omarchy menu, or inline in
 | `refreshMinutes`            | integer | `10`               | How often to re-fetch (5–60 min)                                         |
 | `maxAgeMinutes`             | integer | `40`               | A station's last report older than this is treated as no data (10–180)   |
 | `hoverRefreshMinutes`       | integer | `2`                | Hovering the bar refreshes in the background past this age (1–30)        |
-| `decodeStyle`               | enum    | `Decoded`           | `Decoded` (plain English) or `Coded` (raw text) as the primary view      |
+| `decodeStyle`               | enum    | `Coded`             | Raw METAR first, or the API explanation first; TAF is always raw         |
 
 `allowMultiple` is on, so you can add a second instance of the widget with a
 different airport list if you want, e.g. one for home and one for a
@@ -295,7 +295,7 @@ cross-country you're planning.
 | Middle click  | Force a refresh (bar briefly shows `–` while it's in flight)     |
 | Right click   | Send a desktop notification with a one-line summary              |
 | Hover (bar)   | Tooltip with each airport's full raw METAR                      |
-| Hover (report)| Reveals whichever of coded/decoded isn't the primary view        |
+| Hover (report)| METAR: alternate raw/API-decoded view; TAF: locally decoded explanation        |
 | Click (report)| Copies that station's METAR or TAF (whichever block was clicked, exactly as currently displayed — coded or decoded, following `decodeStyle`) to the clipboard, with a desktop notification confirming it |
 
 Hovering the bar also refreshes in the background if the data is older than

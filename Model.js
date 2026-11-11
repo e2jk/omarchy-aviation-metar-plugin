@@ -134,6 +134,7 @@ var TRUSTED_PATH_ENV = "/usr/bin:/bin"
 // passed as "$1", a separate argv element (not interpolated into the
 // script string), so it never needs shell-quoting.
 var MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
 function buildBoundedFetchScript(maxBytes) {
   return "set -o pipefail; " + TRUSTED_CURL_PATH + " -fsS --max-time 8 --max-filesize " + maxBytes
     + " \"$1\" | " + TRUSTED_HEAD_PATH + " -c " + (maxBytes + 1) + "; exit \"${PIPESTATUS[0]}\""
@@ -504,13 +505,40 @@ function formatClouds(clouds) {
   return parts.join(", ")
 }
 
-// ---- Present-weather (wxString) decoding, e.g. "SHRA", "+TSRA", "-RA",
-// "VCTS", "FZFG". Standard ICAO/METAR abbreviations — no external decode
-// endpoint exists (checked: aviationweather.gov rejects a units/decoded
-// param and its JSON/XML both only ever carry the coded text plus separate
-// numeric fields, never a narrative string). This covers the codes actually
-// seen in METAR/TAF reports; an unrecognized code is left out rather than
-// guessed at.
+// The API's format=decoded response is plain text, with one METAR block
+// per station. Keep its wording unchanged; only separate stations and bind
+// each explanation to the exact raw observation that the API decoded.
+var MAX_DECODED_TEXT_LEN = 8000
+function parseDecodedMetars(text) {
+  if (typeof text !== "string" || text.length > MAX_RESPONSE_BYTES) return {}
+  var headers = /^METAR for ([A-Z0-9]{4})[^\r\n]*\r?$/gm
+  var starts = []
+  var match
+  while (starts.length <= MAX_LIST_ITEMS && (match = headers.exec(text))) {
+    starts.push({ icao: match[1], index: match.index })
+  }
+  var out = {}
+  for (var i = 0; i < starts.length && i < MAX_LIST_ITEMS; i++) {
+    var start = starts[i]
+    var end = i + 1 < starts.length ? starts[i + 1].index : text.length
+    var block = text.slice(start.index, end).trim()
+    var raw = /^ +Text: ([^\r\n]+)\r?$/m.exec(block)
+    // Never silently truncate an explanation or match a truncated raw report.
+    if (!raw || raw[1].length > MAX_STRING_LEN || block.length > MAX_DECODED_TEXT_LEN) continue
+    if (!out[start.icao]) out[start.icao] = { rawOb: raw[1].trim(), text: block }
+  }
+  return out
+}
+
+function decodedMetarText(metar, decodedByIcao) {
+  if (!metar) return ""
+  var decoded = decodedByIcao[String(metar.icaoId || "").toUpperCase()]
+  if (decoded && decoded.rawOb === metar.rawOb) return decoded.text
+  return "Decoded METAR unavailable for this report."
+}
+
+// TAF has no decoded API format. Keep the local TAF-only narrative
+// decoder for its alternate hover view. METAR explanations come from the API.
 var WX_DESCRIPTORS = {
   MI: "shallow", PR: "partial", BC: "patches of", DR: "low drifting",
   BL: "blowing", SH: "showers", TS: "thunderstorm", FZ: "freezing"
@@ -566,44 +594,6 @@ function decodeWxString(wx) {
     if (d) decoded.push(d)
   }
   return decoded.join(", ")
-}
-
-// Full plain-English rendering of a METAR, built from the same structured
-// fields (and the raw-text-parsed visibility) used everywhere else in this
-// file — not a separate/independent parse, so it can't disagree with the
-// coded view or the flight-category letter shown on the bar.
-function decodeMetarText(metar, imperial) {
-  if (!metar) return ""
-  var parts = []
-
-  var wind = formatWind(metar.wdir, metar.wspd, metar.wgst)
-  if (wind === "Calm") parts.push("Wind calm")
-  else if (wind !== "—") parts.push("Wind " + wind)
-
-  var visRaw = parseVisibilityFromRaw(metar.rawOb)
-  if (visRaw && visRaw.cavok) {
-    parts.push("CAVOK — visibility 10km+, no cloud below 5,000ft, no significant weather")
-  } else {
-    var visText = formatVisibilityFromMetar(metar, imperial)
-    if (visText !== "—") parts.push("Visibility " + visText)
-  }
-
-  var wx = decodeWxString(metar.wxString)
-  if (wx) parts.push(wx.charAt(0).toUpperCase() + wx.slice(1))
-
-  if (!visRaw || !visRaw.cavok) parts.push("Clouds: " + formatClouds(metar.clouds).toLowerCase())
-
-  parts.push("Temperature " + formatTemp(metar.temp, imperial) + ", dew point " + formatTemp(metar.dewp, imperial))
-  parts.push("Altimeter " + formatAltimeter(metar.altim, imperial))
-
-  var raw = String(metar.rawOb || "")
-  var trend = ""
-  if (/\bNOSIG\b/.test(raw)) trend = "No significant change expected."
-  else if (/\bBECMG\b/.test(raw)) trend = "Conditions expected to become different — see raw report for detail."
-  else if (/\bTEMPO\b/.test(raw)) trend = "Temporary fluctuations expected — see raw report for detail."
-
-  var sentence = parts.join(". ") + "."
-  return trend ? sentence + " " + trend : sentence
 }
 
 // Plain-English rendering of a TAF, one line per change group. `formatTime`
@@ -970,6 +960,11 @@ function changedIcaos(airportList, before, after) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    decodeWxToken: decodeWxToken,
+    decodeWxString: decodeWxString,
+    decodeTafText: decodeTafText,
+    parseDecodedMetars: parseDecodedMetars,
+    decodedMetarText: decodedMetarText,
     parseAirportList: parseAirportList,
     invalidAirportEntries: invalidAirportEntries,
     invalidAirportCount: invalidAirportCount,
@@ -1016,10 +1011,6 @@ if (typeof module !== "undefined") {
     formatAltimeter: formatAltimeter,
     formatWind: formatWind,
     formatClouds: formatClouds,
-    decodeWxToken: decodeWxToken,
-    decodeWxString: decodeWxString,
-    decodeMetarText: decodeMetarText,
-    decodeTafText: decodeTafText,
     buildByIcao: buildByIcao,
     buildEntries: buildEntries,
     summaryLine: summaryLine,
