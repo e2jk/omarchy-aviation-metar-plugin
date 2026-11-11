@@ -390,6 +390,9 @@ Panel {
   }
 
   Component.onDestruction: {
+    root.rawTafGeneration++
+    rawTafRetryTimer.stop()
+    if (root.rawTafProc && root.rawTafProc.running) root.rawTafProc.signal(15)
     root.decodedGeneration++
     decodedRetryTimer.stop()
     if (root.decodedProc && root.decodedProc.running) root.decodedProc.signal(15)
@@ -406,6 +409,7 @@ Panel {
   // never land and commit after they've changed.
   function refresh() {
     root.requestDecodedMetars()
+    root.requestRawTafs()
     var plan = Model.fetchPlan(root.airportList, root.showTaf)
     if (plan.metar === "abandon") {
       root.abandonMetarFetch()
@@ -565,8 +569,9 @@ Panel {
   function startDecodedMetars() {
     var url = "https://aviationweather.gov/api/data/metar?ids="
       + encodeURIComponent(root.airportList.join(",")) + "&format=decoded"
-    var proc = decodedProcComponent.createObject(root, {
+    var proc = textProcComponent.createObject(root, {
       generation: root.decodedGeneration,
+      resultHandler: root.acceptDecodedMetars,
       command: Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-decoded-metar")
     })
     root.decodedProc = proc
@@ -591,18 +596,69 @@ Panel {
     onTriggered: root.startDecodedMetars()
   }
 
+  // Fetch raw TAF presentation separately from the JSON forecast periods
+  // needed by the local TAF decoder. Every request still batches all ids.
+  property var rawTafByIcao: ({})
+  property var rawTafProc: null
+  property int rawTafGeneration: 0
+  property int rawTafRetries: 0
+
+  function requestRawTafs() {
+    root.rawTafGeneration++
+    root.rawTafRetries = 0
+    rawTafRetryTimer.stop()
+    if (root.rawTafProc && root.rawTafProc.running) root.rawTafProc.signal(15)
+    root.rawTafProc = null
+    if (!root.showTaf || root.airportList.length === 0) {
+      root.rawTafByIcao = {}
+      return
+    }
+    root.startRawTafs()
+  }
+
+  function startRawTafs() {
+    var url = "https://aviationweather.gov/api/data/taf?ids="
+      + encodeURIComponent(root.airportList.join(",")) + "&format=raw"
+    var proc = textProcComponent.createObject(root, {
+      generation: root.rawTafGeneration,
+      resultHandler: root.acceptRawTafs,
+      command: Model.buildFetchCommand(url, root.maxResponseBytes, "fetch-raw-taf")
+    })
+    root.rawTafProc = proc
+    proc.running = true
+  }
+
+  function acceptRawTafs(generation, exitCode, text) {
+    if (generation !== root.rawTafGeneration) return
+    root.rawTafProc = null
+    if (exitCode !== 0 || text.length > root.maxResponseBytes) {
+      root.rawTafRetries++
+      rawTafRetryTimer.interval = Model.retryDelayMs(root.rawTafRetries)
+      rawTafRetryTimer.restart()
+      return
+    }
+    root.rawTafByIcao = Model.parseRawTafs(text)
+    root.rawTafRetries = 0
+  }
+
+  Timer {
+    id: rawTafRetryTimer
+    onTriggered: root.startRawTafs()
+  }
+
   Component {
-    id: decodedProcComponent
+    id: textProcComponent
     Process {
       id: proc
       property int generation: -1
       property bool settled: false
+      property var resultHandler: null
       clearEnvironment: true
       environment: ({ "PATH": Model.TRUSTED_PATH_ENV })
-      stdout: StdioCollector { id: decodedOutput; waitForEnd: true }
+      stdout: StdioCollector { id: textOutput; waitForEnd: true }
       onExited: function(exitCode, exitStatus) {
         settled = true
-        root.acceptDecodedMetars(generation, exitCode, String(decodedOutput.text || ""))
+        resultHandler(generation, exitCode, String(textOutput.text || ""))
         destroy()
       }
       onRunningChanged: {
@@ -612,7 +668,7 @@ Panel {
         Qt.callLater(function() {
           if (!proc || proc.settled) return
           proc.settled = true
-          root.acceptDecodedMetars(proc.generation, -1, "")
+          proc.resultHandler(proc.generation, -1, "")
           proc.destroy()
         })
       }
@@ -1163,7 +1219,7 @@ Panel {
                 Text {
                   id: tafText
                   textFormat: Text.PlainText
-                  text: card.taf ? card.taf.rawTAF : ""
+                  text: Model.formattedTafText(card.taf, root.rawTafByIcao)
                   color: Qt.darker(root.bar.foreground, 1.2)
                   font.family: "monospace"
                   font.pixelSize: Style.font.caption
@@ -1173,7 +1229,7 @@ Panel {
                   HoverHandler { id: tafHover; cursorShape: Qt.PointingHandCursor }
                   TapHandler {
                     onTapped: root.copyToClipboard(
-                      card.taf.rawTAF + "\n\n" + Model.decodeTafText(card.taf, root.imperial, root.formatEpoch),
+                      Model.formattedTafText(card.taf, root.rawTafByIcao) + "\n\n" + Model.decodeTafText(card.taf, root.imperial, root.formatEpoch),
                       card.modelData.icao + " TAF (raw + decoded)")
                   }
                   ToolTip {

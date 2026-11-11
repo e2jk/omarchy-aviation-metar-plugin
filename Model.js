@@ -537,6 +537,36 @@ function decodedMetarText(metar, decodedByIcao) {
   return "Decoded METAR unavailable for this report."
 }
 
+// format=raw preserves the provider's TAF change-group line breaks, unlike
+// JSON's rawTAF field. Separate stations without interpreting the forecast.
+function parseRawTafs(text) {
+  if (typeof text !== "string" || text.length > MAX_RESPONSE_BYTES) return {}
+  var headers = /^(?:TAF )?(?:(?:AMD|COR) )?([A-Z0-9]{4}) \d{6}Z\b/gm
+  var starts = []
+  var match
+  while (starts.length <= MAX_LIST_ITEMS && (match = headers.exec(text))) {
+    starts.push({ icao: match[1], index: match.index })
+  }
+  var out = {}
+  for (var i = 0; i < starts.length && i < MAX_LIST_ITEMS; i++) {
+    var start = starts[i]
+    var end = i + 1 < starts.length ? starts[i + 1].index : text.length
+    var block = text.slice(start.index, end).trim()
+    if (block.length > MAX_DECODED_TEXT_LEN) continue
+    if (!out[start.icao]) out[start.icao] = block
+  }
+  return out
+}
+
+function formattedTafText(taf, rawByIcao) {
+  if (!taf) return ""
+  var raw = rawByIcao[String(taf.icaoId || "").toUpperCase()]
+  // Different requests can straddle a forecast amendment. Only combine a
+  // formatted raw report with JSON/decoded data for that same forecast.
+  if (raw && raw.replace(/\s+/g, " ").trim() === taf.rawTAF.replace(/\s+/g, " ").trim()) return raw
+  return taf.rawTAF
+}
+
 // TAF has no decoded API format. Keep the local TAF-only narrative
 // decoder for its alternate hover view. METAR explanations come from the API.
 var WX_DESCRIPTORS = {
@@ -960,6 +990,8 @@ function changedIcaos(airportList, before, after) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    parseRawTafs: parseRawTafs,
+    formattedTafText: formattedTafText,
     decodeWxToken: decodeWxToken,
     decodeWxString: decodeWxString,
     decodeTafText: decodeTafText,

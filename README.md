@@ -52,7 +52,29 @@ TAFs therefore remain raw in both display modes, with our local TAF decoder
 providing their explanation on hover. Only METAR explanations come from the
 API.
 
+TAF display and clipboard copies preserve the provider's raw-text newlines
+and indentation. We fetch `format=raw` separately because JSON's `rawTAF`
+field is a single line. The formatted response is used only when it matches
+the JSON forecast after ignoring whitespace; while it is unavailable or a
+new forecast is arriving, the JSON raw text remains available.
+
 ## Data source
+
+Every request includes all configured airports in one comma-separated `ids`
+parameter. With TAF enabled, each refresh makes four batched requests:
+
+| Endpoint | Format | Used for |
+|----------|--------|----------|
+| `/api/data/metar` | `json` | Raw METAR, category, and structured popup stats |
+| `/api/data/metar` | `decoded` | Provider's METAR explanation |
+| `/api/data/taf` | `json` | Forecast periods used by our TAF decoder |
+| `/api/data/taf` | `raw` | Provider-formatted raw TAF |
+
+Turning TAF off skips both TAF requests. The API supports
+`metar?format=json&taf=true`, but it adds only `rawTaf`, not the structured
+forecast periods our TAF decoder needs. It cannot replace the separate TAF
+JSON request while keeping that hover explanation. Nor does JSON include
+the provider's METAR explanation or formatted TAF text.
 
 [aviationweather.gov](https://aviationweather.gov)'s public data API — no
 API key, no rate-limit surprises for personal use, and it covers ICAO
