@@ -1093,7 +1093,9 @@ Panel {
 
                 HoverHandler { id: metarHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
-                  onTapped: root.copyToClipboard(metarText.text, card.modelData.icao + " METAR")
+                  onTapped: root.copyToClipboard(
+                    card.metar.rawOb + "\n\n" + Model.decodedMetarText(card.metar, root.decodedByIcao),
+                    card.modelData.icao + " METAR (raw + decoded)")
                 }
                 ToolTip {
                   id: metarToolTip
@@ -1110,7 +1112,7 @@ Panel {
                   delay: 300
                   width: Style.space(360)
                   text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodedMetarText(card.metar, root.decodedByIcao)) : "")
-                    + "\n\nClick copies the " + (root.decoded ? "decoded" : "coded") + " METAR currently displayed, not the " + (root.decoded ? "coded" : "decoded") + " text in this tooltip"
+                    + "\n\nClick copies both the raw METAR and its decoded explanation."
                   contentItem: Text {
                     width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
                     textFormat: Text.PlainText
@@ -1170,7 +1172,9 @@ Panel {
 
                   HoverHandler { id: tafHover; cursorShape: Qt.PointingHandCursor }
                   TapHandler {
-                    onTapped: root.copyToClipboard(tafText.text, card.modelData.icao + " TAF")
+                    onTapped: root.copyToClipboard(
+                      card.taf.rawTAF + "\n\n" + Model.decodeTafText(card.taf, root.imperial, root.formatEpoch),
+                      card.modelData.icao + " TAF (raw + decoded)")
                   }
                   ToolTip {
                     id: tafToolTip
@@ -1180,7 +1184,7 @@ Panel {
                     delay: 300
                     width: Style.space(360)
                     text: (card.taf ? Model.decodeTafText(card.taf, root.imperial, root.formatEpoch) : "")
-                      + "\n\nClick copies the raw TAF currently displayed."
+                      + "\n\nClick copies both the raw TAF and its decoded explanation."
                     contentItem: Text {
                       width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText
