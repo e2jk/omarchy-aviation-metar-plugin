@@ -506,6 +506,25 @@ Panel {
     root.sendNotification(label + " copied")
   }
 
+  function copyAirportReports(icao) {
+    var metar = root.metarByIcao[icao]
+    var taf = root.showTaf ? root.tafByIcao[icao] : null
+    var parts = []
+    if (metar) {
+      parts.push(metar.rawOb)
+      parts.push(Model.decodedMetarText(metar, root.decodedByIcao))
+    } else {
+      parts.push(icao + " METAR unavailable.")
+    }
+    if (taf) {
+      parts.push(Model.formattedTafText(taf, root.rawTafByIcao))
+      parts.push(Model.decodeTafText(taf, root.imperial, root.formatEpoch))
+    } else {
+      parts.push(icao + " TAF unavailable.")
+    }
+    root.copyToClipboard(parts.join("\n\n"), icao + " METAR + TAF (raw + decoded)")
+  }
+
   // omarchy-notification-send is itself a #!/bin/bash script — a fixed,
   // trusted *path* alone doesn't stop the kernel from starting Bash for it
   // and that Bash (and the busctl it calls internally) inheriting whatever
@@ -1149,9 +1168,7 @@ Panel {
 
                 HoverHandler { id: metarHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
-                  onTapped: root.copyToClipboard(
-                    card.metar.rawOb + "\n\n" + Model.decodedMetarText(card.metar, root.decodedByIcao),
-                    card.modelData.icao + " METAR (raw + decoded)")
+                  onTapped: root.copyAirportReports(card.modelData.icao)
                 }
                 ToolTip {
                   id: metarToolTip
@@ -1168,7 +1185,7 @@ Panel {
                   delay: 300
                   width: Style.space(360)
                   text: (card.metar ? (root.decoded ? card.metar.rawOb : Model.decodedMetarText(card.metar, root.decodedByIcao)) : "")
-                    + "\n\nClick copies both the raw METAR and its decoded explanation."
+                    + "\n\nClick copies raw and decoded METAR and TAF for this airport."
                   contentItem: Text {
                     width: Style.space(360) - metarToolTip.leftPadding - metarToolTip.rightPadding
                     textFormat: Text.PlainText
@@ -1228,9 +1245,7 @@ Panel {
 
                   HoverHandler { id: tafHover; cursorShape: Qt.PointingHandCursor }
                   TapHandler {
-                    onTapped: root.copyToClipboard(
-                      Model.formattedTafText(card.taf, root.rawTafByIcao) + "\n\n" + Model.decodeTafText(card.taf, root.imperial, root.formatEpoch),
-                      card.modelData.icao + " TAF (raw + decoded)")
+                    onTapped: root.copyAirportReports(card.modelData.icao)
                   }
                   ToolTip {
                     id: tafToolTip
@@ -1240,7 +1255,7 @@ Panel {
                     delay: 300
                     width: Style.space(360)
                     text: (card.taf ? Model.decodeTafText(card.taf, root.imperial, root.formatEpoch) : "")
-                      + "\n\nClick copies both the raw TAF and its decoded explanation."
+                      + "\n\nClick copies raw and decoded METAR and TAF for this airport."
                     contentItem: Text {
                       width: Style.space(360) - tafToolTip.leftPadding - tafToolTip.rightPadding
                       textFormat: Text.PlainText

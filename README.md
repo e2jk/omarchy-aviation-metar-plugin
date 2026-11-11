@@ -319,7 +319,7 @@ cross-country you're planning.
 | Right click   | Send a desktop notification with a one-line summary              |
 | Hover (bar)   | Tooltip with each airport's full raw METAR                      |
 | Hover (report)| METAR: alternate raw/API-decoded view; TAF: locally decoded explanation        |
-| Click (report)| Copies the raw METAR or TAF followed by its decoded explanation, regardless of `decodeStyle`, with a desktop notification confirming it. If the METAR explanation is unavailable, copies the raw report with an explicit unavailable message. |
+| Click (either report)| Copies that airport's raw METAR, decoded METAR, raw TAF, and decoded TAF together, regardless of `decodeStyle`, with a desktop notification confirming it. Missing reports or METAR explanations are identified explicitly. |
 
 Hovering the bar also refreshes in the background if the data is older than
 `hoverRefreshMinutes` (default 2 min) — silently. It only becomes visible
