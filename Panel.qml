@@ -1227,13 +1227,6 @@ Panel {
                 topPadding: Style.space(4)
 
                 Text {
-                  text: "TAF"
-                  color: Qt.darker(root.bar.foreground, 1.5)
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.letterSpacing: 1
-                }
-                Text {
                   id: tafText
                   textFormat: Text.PlainText
                   text: Model.formattedTafText(card.taf, root.rawTafByIcao)
