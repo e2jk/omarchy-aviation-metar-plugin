@@ -25,8 +25,10 @@ The bar shows plain letters (`V`/`M`/`I`/`L`, plus `–` while refreshing, `…`
 while loading for the first time, and `?` for no data — see below) rather
 than color-coding by category, so the indicator stays legible and consistent
 across themes and doesn't compete with the rest of the bar for visual
-weight. The full word (`VFR`, `MVFR`, ...) and station name are in the popup
-and in the hover tooltip.
+weight. The full word (`VFR`, `MVFR`, ...) and station name are in the popup.
+Hovering the bar shows the full raw METAR for each configured airport, one
+report per line, without an extra airport-code prefix. Stale reports retain
+a status warning; stations without a report show their code and status.
 
 ## Coded vs. decoded
 
@@ -280,7 +282,6 @@ Set these from Setup → Plugins in the Omarchy menu, or inline in
 | `maxAgeMinutes`             | integer | `40`               | A station's last report older than this is treated as no data (10–180)   |
 | `hoverRefreshMinutes`       | integer | `2`                | Hovering the bar refreshes in the background past this age (1–30)        |
 | `decodeStyle`               | enum    | `Decoded`           | `Decoded` (plain English) or `Coded` (raw text) as the primary view      |
-| `showStationNameInTooltip`  | boolean | `true`             | Include the full airport name in the bar's hover tooltip                 |
 
 `allowMultiple` is on, so you can add a second instance of the widget with a
 different airport list if you want, e.g. one for home and one for a
@@ -293,7 +294,7 @@ cross-country you're planning.
 | Left click    | Toggle the detail popup                                         |
 | Middle click  | Force a refresh (bar briefly shows `–` while it's in flight)     |
 | Right click   | Send a desktop notification with a one-line summary              |
-| Hover (bar)   | Tooltip with each airport's full category and (optionally) name  |
+| Hover (bar)   | Tooltip with each airport's full raw METAR                      |
 | Hover (report)| Reveals whichever of coded/decoded isn't the primary view        |
 | Click (report)| Copies that station's METAR or TAF (whichever block was clicked, exactly as currently displayed — coded or decoded, following `decodeStyle`) to the clipboard, with a desktop notification confirming it |
 

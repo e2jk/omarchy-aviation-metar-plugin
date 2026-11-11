@@ -76,13 +76,13 @@ BarWidget {
     return parts.join(" ")
   }
 
-  readonly property bool showStationNameInTooltip: setting("showStationNameInTooltip", true) === true
-
   readonly property string barTooltip: {
     var lines = []
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i]
-      lines.push(e.icao + "  " + e.category + (root.showStationNameInTooltip && e.stationName ? "  (" + e.stationName + ")" : ""))
+      var raw = e.metar ? e.metar.rawOb : ""
+      if (raw) lines.push(raw + (e.stale ? "\n" + e.category : ""))
+      else lines.push(e.icao + "  " + e.category)
     }
     return lines.join("\n")
   }
@@ -160,7 +160,14 @@ BarWidget {
 
     onPressed: function(b) {
       if (!root.bar) return
-      if (b === Qt.RightButton) root.sendNotification(root.barTooltip.replace(/\n/g, " · "))
+      if (b === Qt.RightButton) {
+        var summary = []
+        for (var i = 0; i < root.entries.length; i++) {
+          var e = root.entries[i]
+          summary.push(e.icao + "  " + e.category + (e.stationName ? "  (" + e.stationName + ")" : ""))
+        }
+        root.sendNotification(summary.join(" · "))
+      }
       else if (b === Qt.MiddleButton) root.refreshManual()
       else root.togglePanel()
     }

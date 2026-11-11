@@ -48,13 +48,6 @@
         "defaultValue": 10
       },
       {
-        "key": "showStationNameInTooltip",
-        "type": "boolean",
-        "label": "Show station name in tooltip",
-        "description": "Include the full airport name in the hover tooltip, not just the ICAO code and category.",
-        "defaultValue": true
-      },
-      {
         "key": "decodeStyle",
         "type": "enum",
         "label": "METAR/TAF report style",
